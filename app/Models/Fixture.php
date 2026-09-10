@@ -6,10 +6,16 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Fixture extends Model
 {
     use HasFactory;
+
+    public function predictions(): HasMany
+    {
+        return $this->hasMany(Prediction::class);
+    }
 
     protected $fillable = ['league_id', 'home_team_id', 'away_team_id', 'kickoff_at', 'is_finished'];
 

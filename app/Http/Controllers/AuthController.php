@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Requests\RegisterRequest;
 use App\Models\Company;
 use App\Models\User;
+use App\Services\CreditService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -18,6 +19,7 @@ class AuthController extends Controller
             $user = User::create($request->safe()->only(['name', 'email', 'password']));
             $company = Company::create(['name' => $request->validated('company_name')]);
             $user->companies()->attach($company, ['role' => 'owner']);
+            app(CreditService::class)->topUp($company, $user, 10, 'welcome');
 
             return $user;
         });

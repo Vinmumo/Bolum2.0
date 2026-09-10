@@ -14,7 +14,7 @@ return new class extends Migration
         Schema::create('companies', function (Blueprint $t) {
             $t->id();
             $t->string('name');
-            $t->unsignedInteger('credits')->default(10);
+            $t->unsignedInteger('credits')->default(0);
             $t->timestamps();
         });
         Schema::create('company_user', function (Blueprint $t) {

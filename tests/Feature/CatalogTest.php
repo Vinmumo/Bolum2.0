@@ -7,6 +7,7 @@ use App\Models\League;
 use App\Models\Team;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -65,5 +66,18 @@ class CatalogTest extends TestCase
     {
         Sanctum::actingAs(User::factory()->create(['is_admin' => true]));
         $this->postJson('/api/v1/providers', ['name' => 'Bad', 'driver' => 'sample', 'weight' => 0])->assertUnprocessable()->assertJsonValidationErrors('weight');
+    }
+
+    public function test_eager_loading_keeps_query_count_constant_as_page_grows(): void
+    {
+        Fixture::factory()->count(20)->create();
+        DB::enableQueryLog();
+        $this->getJson('/api/v1/fixtures?per_page=2')->assertOk();
+        $small = count(DB::getQueryLog());
+        DB::flushQueryLog();
+        $this->getJson('/api/v1/fixtures?per_page=20')->assertOk();
+        $large = count(DB::getQueryLog());
+        DB::disableQueryLog();
+        $this->assertSame($small, $large);
     }
 }

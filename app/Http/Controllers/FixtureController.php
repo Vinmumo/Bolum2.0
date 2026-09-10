@@ -6,9 +6,7 @@ use App\Http\Requests\FixtureRequest;
 use App\Http\Requests\ListRequest;
 use App\Http\Resources\FixtureResource;
 use App\Models\Fixture;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
-use Illuminate\Support\Facades\Schema;
 
 class FixtureController extends Controller
 {
@@ -39,9 +37,8 @@ class FixtureController extends Controller
     public function destroy(Fixture $fixture)
     {
         Gate::authorize('manage-catalog');
-        if (Schema::hasTable('predictions')) {
-            abort_if(DB::table('predictions')->where('fixture_id', $fixture->id)->exists(), 409, 'Fixtures with prediction history cannot be deleted.');
-        } $fixture->delete();
+        abort_if($fixture->predictions()->exists(), 409, 'Fixtures with prediction history cannot be deleted.');
+        $fixture->delete();
 
         return response()->noContent();
     }

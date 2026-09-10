@@ -19,7 +19,7 @@ class CatalogTest extends TestCase
     {
         $response = $this->postJson('/api/v1/auth/register', ['name' => 'Alex', 'email' => 'alex@example.test', 'password' => 'strong-password', 'password_confirmation' => 'strong-password', 'company_name' => 'Alex Analytics'])->assertCreated();
         $token = $response->json('data.token');
-        $this->assertDatabaseHas('company_user', ['user_id' => 1, 'role' => 'owner']);
+        $this->assertDatabaseHas('company_user', ['user_id' => $response->json('data.user.id'), 'role' => 'owner']);
         $this->assertDatabaseHas('users', ['email' => 'alex@example.test', 'is_admin' => false]);
         $this->withToken($token)->getJson('/api/v1/auth/me')->assertOk();
         $this->withToken($token)->postJson('/api/v1/auth/logout')->assertNoContent();

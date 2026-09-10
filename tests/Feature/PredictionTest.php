@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\PredictionStatus;
 use App\Jobs\GeneratePrediction;
 use App\Models\Company;
+use App\Models\CreditEntry;
 use App\Models\Fixture;
 use App\Models\Prediction;
 use App\Models\Provider;
@@ -158,8 +159,11 @@ class PredictionTest extends TestCase
 
     public function test_database_constraint_and_transaction_rollback_preserve_balance(): void
     {
-        // Deliberately collide with the next debit ledger key to fail the second write.
-        $this->company->creditEntries()->create(['user_id' => $this->member->id, 'idempotency_key' => 'debit:1', 'kind' => 'test_collision', 'amount' => 0, 'balance_after' => 10]);
+        // Force the debit ledger insert to violate uniqueness, independent of engine sequences.
+        $this->company->creditEntries()->create(['user_id' => $this->member->id, 'idempotency_key' => 'forced-collision', 'kind' => 'test_collision', 'amount' => 0, 'balance_after' => 10]);
+        CreditEntry::creating(function ($entry) {
+            $entry->idempotency_key = 'forced-collision';
+        });
         try {
             app(PredictionService::class)->request($this->company, $this->fixture, $this->member, 'rollback');
             $this->fail('Expected unique constraint violation.');
@@ -167,6 +171,8 @@ class PredictionTest extends TestCase
             $this->assertSame(10, $this->company->fresh()->credits);
             $this->assertDatabaseCount('predictions', 0);
             Queue::assertNothingPushed();
+        } finally {
+            CreditEntry::flushEventListeners();
         }
     }
 
@@ -176,6 +182,6 @@ class PredictionTest extends TestCase
         Prediction::whereKey($id)->update(['created_at' => now()->subMinutes(6)]);
         Queue::fake();
         $this->artisan('predictions:recover')->assertSuccessful();
-        Queue::assertPushed(GeneratePrediction::class,1);
+        Queue::assertPushed(GeneratePrediction::class, 1);
     }
 }

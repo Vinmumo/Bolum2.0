@@ -1,0 +1,68 @@
+### Run with a REST client extension. Copy the token and IDs from login / fixtures.
+@base = http://127.0.0.1:8000/api/v1
+@token = REPLACE_WITH_LOGIN_TOKEN
+@company = 1
+@fixture = 1
+@prediction = 1
+
+### Login
+POST {{base}}/auth/login
+Accept: application/json
+Content-Type: application/json
+
+{"email":"admin@bolum.test","password":"password123"}
+
+### Paginated fixtures
+GET {{base}}/fixtures?per_page=2&upcoming=1
+Accept: application/json
+
+### Invalid fixture: same team on both sides
+PATCH {{base}}/fixtures/{{fixture}}
+Authorization: Bearer {{token}}
+Accept: application/json
+Content-Type: application/json
+
+{"home_team_id":1,"away_team_id":1}
+
+### Queue prediction; repeat to demonstrate idempotency
+POST {{base}}/companies/{{company}}/fixtures/{{fixture}}/predictions
+Authorization: Bearer {{token}}
+Idempotency-Key: example-prediction-001
+Accept: application/json
+Content-Type: application/json
+
+{}
+
+### Read status after running the queue worker
+GET {{base}}/companies/{{company}}/predictions/{{prediction}}
+Authorization: Bearer {{token}}
+Accept: application/json
+
+### Latest completed result
+GET {{base}}/companies/{{company}}/fixtures/{{fixture}}/predictions/latest
+Authorization: Bearer {{token}}
+Accept: application/json
+
+### Credit ledger
+GET {{base}}/companies/{{company}}/credits
+Authorization: Bearer {{token}}
+Accept: application/json
+
+### Owner-only demo top-up
+POST {{base}}/companies/{{company}}/credits/top-ups
+Authorization: Bearer {{token}}
+Idempotency-Key: example-topup-001
+Accept: application/json
+Content-Type: application/json
+
+{"amount":20}
+
+### Company isolation: seeded admin is not a member of company 2
+GET {{base}}/companies/2/predictions
+Authorization: Bearer {{token}}
+Accept: application/json
+
+### Revoke this token
+POST {{base}}/auth/logout
+Authorization: Bearer {{token}}
+Accept: application/json

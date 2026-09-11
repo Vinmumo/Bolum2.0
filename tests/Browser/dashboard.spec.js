@@ -1,6 +1,35 @@
 import { test, expect } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 
+test('imported league opens on upcoming fixtures and all matches remains available', async ({ page }) => {
+    await page.route('**/api/v1/leagues?*', route => route.fulfill({json:{data:[
+        {id:1,name:'Demo Premier League',country:'England',source:'local'},
+        {id:2,name:'Premier League',country:'England',source:'football-data'},
+    ]}}));
+    const requests = [];
+    await page.route('**/api/v1/fixtures?*', route => {
+        requests.push(new URL(route.request().url()));
+        return route.fulfill({json:{data:[{
+            id:100,league:{id:2,name:'Premier League'},home_team:{name:'Arsenal FC'},away_team:{name:'Liverpool FC'},
+            kickoff_at:new Date(Date.now()+86400000).toISOString(),status:'scheduled',is_finished:false,matchday:4,source:'football-data',score:{home:null,away:null},
+        }],meta:{total:1,current_page:1,last_page:1},links:{prev:null,next:null}}});
+    });
+    await page.goto('/');
+    await expect(page.locator('#league-filter')).toHaveValue('2');
+    await expect(page.locator('#status-filter')).toHaveValue('upcoming');
+    await expect(page.locator('.fixture-card')).toContainText('Arsenal FC');
+    await expect(page.locator('#fixture-context')).toContainText('Real fixtures from football-data.org');
+    expect(requests[0].searchParams.get('league_id')).toBe('2');
+    expect(requests[0].searchParams.get('upcoming')).toBe('1');
+    expect(requests[0].searchParams.has('status')).toBe(false);
+    await page.locator('#league-filter').selectOption('');
+    await page.locator('#status-filter').selectOption('');
+    await page.getByRole('button', {name:'Apply filters'}).click();
+    await expect(page.locator('#fixture-context')).toContainText('imported and local');
+    expect(requests.at(-1).searchParams.has('league_id')).toBe(false);
+    expect(requests.at(-1).searchParams.has('upcoming')).toBe(false);
+});
+
 async function signIn(page, email = 'admin@bolum.test') {
     await page.goto('/');
     await page.getByRole('button', { name: 'Sign in', exact: false }).first().click();
@@ -10,6 +39,56 @@ async function signIn(page, email = 'admin@bolum.test') {
     await expect(page.locator('#auth-dialog')).not.toBeVisible();
     await expect(page.locator('#company')).toBeVisible();
 }
+
+test('fixture loading holds its layout, recovers after errors, and respects reduced motion', async ({ page }) => {
+    let release;
+    const gate = new Promise(resolve => release = resolve);
+    let attempt = 0;
+    await page.route('**/api/v1/fixtures?*', async route => {
+        attempt++;
+        if (attempt === 1) { await gate; return route.continue(); }
+        if (attempt === 2) return route.fulfill({status:503,json:{message:'Fixture feed temporarily unavailable.'}});
+        return route.continue();
+    });
+    await page.emulateMedia({reducedMotion:'reduce'});
+    await page.goto('/');
+    await expect(page.locator('#fixtures')).toHaveAttribute('aria-busy','true');
+    await expect(page.locator('.skeleton-card')).toHaveCount(6);
+    await expect(page.locator('#network-status')).toBeVisible();
+    expect(await page.locator('.skeleton-line').first().evaluate(el => getComputedStyle(el).animationName)).toBe('none');
+    await page.screenshot({path:'/tmp/bolum-loading-desktop.png',fullPage:true});
+    release();
+    await expect(page.locator('.fixture-card')).toHaveCount(4);
+    await expect(page.locator('#fixtures')).toHaveAttribute('aria-busy','false');
+    await page.getByRole('button',{name:'Apply filters'}).click();
+    await expect(page.locator('#fixtures')).toContainText('Fixture feed temporarily unavailable.');
+    await expect(page.locator('#fixtures')).toHaveAttribute('aria-busy','false');
+    await expect(page.locator('#network-status')).not.toBeVisible();
+    await page.locator('#fixtures [data-retry]').click();
+    await expect(page.locator('.fixture-card')).toHaveCount(4);
+    await expect(page.getByRole('button',{name:'Apply filters'})).toBeEnabled();
+});
+
+test('match details provide a recoverable loading state', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('.fixture-card')).toHaveCount(4);
+    let release;
+    const gate = new Promise(resolve => release = resolve);
+    let attempt = 0;
+    await page.route(/\/api\/v1\/fixtures\/\d+$/, async route => {
+        if (++attempt === 1) { await gate; return route.fulfill({status:503,json:{message:'Match details temporarily unavailable.'}}); }
+        return route.continue();
+    });
+    await page.locator('[data-fixture]').first().click();
+    await expect(page.locator('#detail-body')).toHaveAttribute('aria-busy','true');
+    await expect(page.locator('#detail-body')).toContainText('Loading match analysis');
+    release();
+    await expect(page.locator('#detail-body')).toContainText('Match details temporarily unavailable.');
+    await expect(page.locator('#detail-body')).toHaveAttribute('aria-busy','false');
+    await page.locator('#detail-body [data-retry]').click();
+    await expect(page.locator('#generate')).toBeVisible();
+    await expect(page.locator('#detail-body .skeleton-row')).toHaveCount(0);
+});
 
 test('public match browser and responsive navigation', async ({ page }) => {
     const errors = [];

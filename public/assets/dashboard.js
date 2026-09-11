@@ -10,15 +10,50 @@
     const state = {user:null,companies:[],company:null,epoch:0,fixtures:[],leagues:[],predictions:[],providers:[],page:1,historyPage:1,tab:'matches',selected:null,prediction:null,detailVersion:0,keys:new Map(),polling:false};
     let csrf = document.querySelector('meta[name="csrf-token"]').content;
     let toastTimer;
-    let fixtureRequest = 0, privateRequest = 0;
+    let fixtureRequest = 0, privateRequest = 0, performanceRequest = 0, providerRequest = 0;
+    let loadingVersion = 0, pendingRequests = 0, networkTimer;
+    const spinner = '<span class="loading-spinner" aria-hidden="true"></span>';
+    function networkBusy(change) {
+        pendingRequests += change;
+        if (pendingRequests === 1 && change > 0) networkTimer = setTimeout(() => $('network-status').hidden = false, 150);
+        if (!pendingRequests) { clearTimeout(networkTimer); $('network-status').hidden = true; }
+    }
+    function skeleton(label, cards = false) {
+        return `<div class="loading-caption" role="status">${spinner}${esc(label)}</div>${Array.from({length:cards ? 6 : 3}, () => `<div class="${cards ? 'skeleton-card' : 'skeleton-row'}" aria-hidden="true"><span class="skeleton-line short"></span>${cards ? '<div class="skeleton-teams"><i></i><i></i></div>' : ''}<span class="skeleton-line"></span><span class="skeleton-line short"></span></div>`).join('')}`;
+    }
+    async function withLoading(ids, label, task, {quiet = false} = {}) {
+        const version = String(++loadingVersion), epoch = state.epoch;
+        for (const id of ids) {
+            const el = $(id); el.dataset.loadingVersion = version; el.setAttribute('aria-busy','true');
+            if (!quiet) el.innerHTML = skeleton(label, ['fixtures','providers'].includes(id));
+        }
+        try { return await task(); }
+        catch (error) {
+            for (const id of ids) {
+                const el = $(id);
+                if (el.dataset.loadingVersion === version && epoch === state.epoch && !quiet) el.innerHTML = `<div class="empty load-error"><strong>Unable to load this section</strong><p>${esc(error.message)}</p><button class="button secondary" data-retry="${id}">Try again</button></div>`;
+            }
+            throw error;
+        } finally {
+            for (const id of ids) if ($(id).dataset.loadingVersion === version) $(id).setAttribute('aria-busy','false');
+        }
+    }
+    function buttonLoading(button, label) {
+        const html = button.innerHTML, disabled = button.disabled;
+        button.disabled = true; button.setAttribute('aria-busy','true'); button.innerHTML = `${spinner}${esc(label)}`;
+        return () => { button.innerHTML = html; button.disabled = disabled; button.removeAttribute('aria-busy'); };
+    }
     function notice(message, error = false) {
         clearTimeout(toastTimer); $('notice').textContent = message; $('notice').className = `notice${error ? ' error' : ''}`; $('notice').hidden = false;
         if (!error) toastTimer = setTimeout(() => $('notice').hidden = true, 6500);
     }
-    async function api(path, {method='GET',data,headers={}} = {}) {
+    async function api(path, {method='GET',data,headers={},background=false} = {}) {
+        const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 30000);
+        if (!background) networkBusy(1);
+        try {
         let response;
-        try { response = await fetch(path, {method,credentials:'same-origin',headers:{'Accept':'application/json','Content-Type':'application/json','X-CSRF-TOKEN':csrf,...headers},...(data !== undefined ? {body:JSON.stringify(data)} : {})}); }
-        catch { throw new Error('Unable to reach Bolum. Check your connection and try again.'); }
+        try { response = await fetch(path, {method,signal:controller.signal,credentials:'same-origin',headers:{'Accept':'application/json','Content-Type':'application/json','X-CSRF-TOKEN':csrf,...headers},...(data !== undefined ? {body:JSON.stringify(data)} : {})}); }
+        catch { throw new Error(controller.signal.aborted ? 'The request took too long. Try again.' : 'Unable to reach Bolum. Check your connection and try again.'); }
         const body = response.status === 204 ? {} : await response.json().catch(() => ({}));
         if (!response.ok) {
             const message = response.status === 419 ? 'Your session expired. Reload this page and sign in again.' : Object.values(body.errors || {}).flat()[0] || body.message || 'The request could not be completed.';
@@ -26,6 +61,7 @@
         }
         if (body.csrf_token) csrf = body.csrf_token;
         return body;
+        } finally { clearTimeout(timeout); if (!background) networkBusy(-1); }
     }
     function companyPath(path) { return `/api/v1/companies/${state.company}${path}`; }
     function empty(title, description, signin = false) { return `<div class="empty"><strong>${esc(title)}</strong>${esc(description)}${signin ? '<br><button class="button primary" data-signin>Sign in →</button>' : ''}</div>`; }
@@ -56,7 +92,8 @@
         catch(error) { if (error.status !== 401) notice(error.message,true); state.user = null; state.company = null; state.companies = []; }
         state.epoch++; renderIdentity();
     }
-    function renderFixtures() {
+    function renderFixtures(force = false) {
+        if (!force && $('fixtures').getAttribute('aria-busy') === 'true') return;
         const latest = new Map(); state.predictions.forEach(p => { if (!latest.has(p.fixture_id)) latest.set(p.fixture_id,p); });
         $('fixtures').innerHTML = state.fixtures.map(f => {
             const prediction = latest.get(f.id);
@@ -65,20 +102,32 @@
     }
     async function loadFixtures() {
         const requestId = ++fixtureRequest;
+        $('fixtures-prev').disabled = $('fixtures-next').disabled = true;
+        $('fixture-page-label').textContent = 'Loading fixtures…'; $('fixture-count').textContent = '…';
+        return withLoading(['fixtures'], 'Finding fixtures…', async () => {
         const params = new URLSearchParams(new FormData($('filters'))); [...params.keys()].forEach(key => { if (!params.get(key)) params.delete(key); });
+        if (params.get('status') === 'upcoming') { params.delete('status'); params.set('upcoming','1'); }
         params.set('page',state.page); params.set('per_page',9);
         const page = state.page, response = await api(`/api/v1/fixtures?${params}`);
         if (page !== state.page || requestId !== fixtureRequest) return;
-        state.fixtures = response.data; renderFixtures(); $('fixture-count').textContent = response.meta.total;
+        state.fixtures = response.data; renderFixtures(true); $('fixture-count').textContent = response.meta.total;
+        const league = state.leagues.find(l => String(l.id) === $('league-filter').value);
+        $('fixture-context').textContent = league?.source === 'football-data' ? 'Real fixtures from football-data.org. Kickoff times are shown in your local time.' : 'Browse imported and local fixtures. Local sample schedules are for demonstration.';
         $('fixture-page-label').textContent = `${response.meta.total} fixtures · Page ${response.meta.current_page} of ${response.meta.last_page}`;
         $('fixtures-prev').disabled = !response.links.prev; $('fixtures-next').disabled = !response.links.next;
+        }).finally(() => { if (requestId === fixtureRequest && $('fixtures').querySelector('.load-error')) { $('fixture-count').textContent = '—'; $('fixture-page-label').textContent = 'Fixtures could not be loaded.'; } });
     }
     async function loadLeagues() {
+        const previous = $('league-filter').value;
         const response = await api('/api/v1/leagues?per_page=100'); state.leagues = response.data;
         const options = state.leagues.map(l => `<option value="${l.id}">${esc(l.name)}</option>`).join('');
         $('league-filter').innerHTML = '<option value="">All leagues</option>' + options; $('fixture-league').innerHTML = options;
+        const preferred = state.leagues.find(l => l.source === 'football-data');
+        $('league-filter').value = state.catalogLoaded ? previous : String(preferred?.id || '');
+        state.catalogLoaded = true;
     }
-    async function loadPrivate() {
+    async function loadPrivate({quiet = false} = {}) {
+        if (quiet && $('predictions').getAttribute('aria-busy') === 'true') return;
         const requestId = ++privateRequest;
         const epoch = state.epoch;
         if (!state.company) {
@@ -87,17 +136,21 @@
             $('ledger').innerHTML = empty('A clear credit trail','Sign in to see grants, debits and refunds.',true);
             $('prediction-page-label').textContent = ''; $('predictions-prev').disabled = $('predictions-next').disabled = true; renderFixtures(); return;
         }
-        const [history,credits] = await Promise.all([api(companyPath(`/predictions?per_page=15&page=${state.historyPage}`)),api(companyPath('/credits?per_page=15'))]);
+        if (!quiet) { $('prediction-count').textContent = $('credit-count').textContent = '…'; $('predictions-prev').disabled = $('predictions-next').disabled = true; $('prediction-page-label').textContent = 'Loading history…'; }
+        return withLoading(['predictions','ledger'], 'Loading your company activity…', async () => {
+        const [history,credits] = await Promise.all([api(companyPath(`/predictions?per_page=15&page=${state.historyPage}`),{background:quiet}),api(companyPath('/credits?per_page=15'),{background:quiet})]);
         if (epoch !== state.epoch || requestId !== privateRequest) return;
         state.predictions = history.data; $('prediction-count').textContent = history.meta.total; $('credit-count').textContent = credits.balance;
         $('prediction-page-label').textContent = `Page ${history.meta.current_page} of ${history.meta.last_page}`; $('predictions-prev').disabled = !history.links.prev; $('predictions-next').disabled = !history.links.next;
         $('predictions').innerHTML = history.data.map(p => `<div class="list-row"><div><strong>${esc(p.fixture_snapshot.home_name || p.fixture?.home_team?.name || 'Home')} vs ${esc(p.fixture_snapshot.away_name || p.fixture?.away_team?.name || 'Away')}</strong><small>#${p.id} · ${esc(when(p.created_at))} · ${esc(p.result?.data_quality || 'Awaiting result')}</small></div>${badge(p.status)}<button class="button secondary" data-prediction="${p.id}">View result ↗</button></div>`).join('') || empty('No predictions yet','Open a fixture and request your first prediction.');
         $('ledger').innerHTML = credits.data.map(e => `<div class="list-row"><div>${esc(e.kind.replaceAll('_',' '))}<small>${esc(when(e.created_at))}${e.prediction_id ? ` · Prediction #${e.prediction_id}` : ''}</small></div><strong class="${e.amount > 0 ? 'positive' : 'negative'}">${e.amount > 0 ? '+' : ''}${e.amount} credits</strong><small>Balance ${e.balance_after}</small></div>`).join('') || empty('No credit activity','Your transactions will appear here.');
         renderFixtures();
+        }, {quiet}).finally(() => { if (epoch === state.epoch && requestId === privateRequest && $('predictions').querySelector('.load-error')) { $('prediction-count').textContent = $('credit-count').textContent = '—'; $('prediction-page-label').textContent = ''; } });
     }
     async function openFixture(id, predictionId = null) {
-        const version = ++state.detailVersion; state.selected = null; state.prediction = null; $('detail-title').textContent = 'Loading fixture…'; $('detail-body').innerHTML = '<p>Loading match details…</p>';
+        const version = ++state.detailVersion; state.selected = null; state.prediction = null; state.detailTarget = {id,predictionId}; $('detail-title').textContent = 'Loading fixture…';
         if (!$('detail-dialog').open) $('detail-dialog').showModal();
+        return withLoading(['detail-body'], 'Loading match analysis…', async () => {
         const fixture = await api(`/api/v1/fixtures/${id}`); if (version !== state.detailVersion) return;
         state.selected = fixture.data;
         if (state.company) {
@@ -106,6 +159,7 @@
             state.prediction = predictionId ? response.data : response.data[0] || null;
         }
         renderDetail();
+        });
     }
     function renderDetail() {
         const f = state.selected, p = state.prediction; if (!f) return;
@@ -113,7 +167,7 @@
         const canPredict = f.status === 'scheduled' && new Date(f.kickoff_at) > new Date();
         let html = `<div class="detail-meta">${esc(f.league.name)} · ${esc(when(f.kickoff_at))} ${badge(f.status)}</div>`;
         if (p) html += `<p>Prediction #${p.id} · ${esc(when(p.created_at))} ${badge(p.status)}</p>`;
-        if (p?.status === 'pending') html += '<div class="notice">Your prediction is queued. This page updates automatically when it is ready.</div>';
+        if (p?.status === 'pending') html += `<div class="notice queued-state" role="status">${spinner}<div><strong>Your prediction is queued.</strong><br>This page updates automatically when it is ready.</div></div>`;
         if (p?.status === 'failed') html += `<div class="notice error">${esc(p.error)}</div>`;
         if (p?.result) {
             const r = p.result;
@@ -131,28 +185,35 @@
         if (!state.user) { $('detail-dialog').close(); $('auth-dialog').showModal(); return; }
         const epoch = state.epoch, version = state.detailVersion, f = state.selected, keyId = `${state.company}:${f.id}`;
         const key = state.keys.get(keyId) || crypto.randomUUID(); state.keys.set(keyId,key);
-        button.disabled = true; button.textContent = 'Requesting…';
+        buttonLoading(button, 'Requesting prediction…');
         try {
             const response = await api(companyPath(`/fixtures/${f.id}/predictions`),{method:'POST',data:{},headers:{'Idempotency-Key':key}});
             state.keys.delete(keyId); if (epoch !== state.epoch) return;
             if (version === state.detailVersion && state.selected?.id === f.id) { state.prediction = response.data; renderDetail(); } await loadPrivate(); notice('Prediction requested. Your result will appear here.');
-        } catch(error) { button.disabled = false; button.textContent = 'Retry prediction request · 1 credit'; notice(error.message,true); }
+        } catch(error) { button.disabled = false; button.removeAttribute('aria-busy'); button.textContent = 'Retry prediction request · 1 credit'; notice(error.message,true); }
     }
     async function loadPerformance() {
+        const requestId = ++performanceRequest;
         if (!state.company) { $('performance').innerHTML = empty('Measure your predictions','Sign in to view your company’s performance.',true); return; }
         const epoch = state.epoch, quality = $('quality').value;
-        const response = await api(companyPath(`/performance?quality=${quality}`)); if (epoch !== state.epoch || quality !== $('quality').value) return;
+        return withLoading(['performance'], 'Loading prediction performance…', async () => {
+        const response = await api(companyPath(`/performance?quality=${quality}`)); if (epoch !== state.epoch || quality !== $('quality').value || requestId !== performanceRequest) return;
         const r = response.data;
         if (!r.count) { $('performance').innerHTML = empty('No evaluated matches yet','Predictions must be completed before kickoff, and the fixture must have a recorded final score. Try the correct data category.'); return; }
         $('performance').innerHTML = `<div class="metrics"><article class="metric"><div>Evaluated fixtures</div><strong>${r.count}</strong><small>${esc(quality)} data only</small></article><article class="metric"><div>Outcome accuracy</div><strong>${pct(r.accuracy)}</strong><small>Most likely outcome versus actual result</small></article><article class="metric"><div>Brier score</div><strong>${number(r.brier_score,3)}</strong><small>0 is best · 2 is worst</small></article></div><h2>Confidence and outcomes</h2><p class="panel-note">Blue: average confidence. Green: observed accuracy. Log loss: ${number(r.log_loss,3)} (lower is better).</p><div class="calibration">${r.calibration.map(b => `<div class="calibration-column"><div class="calibration-track"><div style="height:${b.confidence*100}%" title="Confidence ${pct(b.confidence)}"></div><div class="actual" style="height:${b.accuracy*100}%" title="Accuracy ${pct(b.accuracy)}"></div></div>${esc(b.label)}<small>${b.count} fixtures</small></div>`).join('')}</div><p class="panel-note">${esc(r.method)} Sample and mixed data are kept separate from external-data results. Small samples do not establish forecasting quality.</p><div class="list-panel">${r.recent.map(row => `<div class="list-row"><div>${esc(row.fixture.home_name || 'Home')} vs ${esc(row.fixture.away_name || 'Away')}<small>Prediction #${row.prediction_id} · ${pct(row.confidence)} confidence</small></div><strong>${row.home_goals} : ${row.away_goals}</strong>${badge(row.correct ? 'matched' : 'missed')}</div>`).join('')}</div>`;
+        });
     }
-    async function loadProviders() {
+    async function loadProviders({quiet = false} = {}) {
         if (!state.user?.is_admin) return;
-        const epoch = state.epoch, [providers,usage] = await Promise.all([api('/api/v1/providers?per_page=100'),api('/api/v1/providers/usage')]);
-        if (epoch !== state.epoch || !state.user?.is_admin) return;
+        if (quiet && $('providers').getAttribute('aria-busy') === 'true') return;
+        const epoch = state.epoch, requestId = ++providerRequest;
+        return withLoading(['providers','provider-usage'], 'Loading data sources…', async () => {
+        const [providers,usage] = await Promise.all([api('/api/v1/providers?per_page=100',{background:quiet}),api('/api/v1/providers/usage',{background:quiet})]);
+        if (epoch !== state.epoch || !state.user?.is_admin || requestId !== providerRequest) return;
         state.providers = providers.data;
         $('providers').innerHTML = providers.data.map(p => `<article class="fixture-card provider-card">${badge(p.is_active ? 'active' : 'paused')}<h3>${esc(p.name)}</h3><p>${p.driver === 'sample' ? 'Synthetic sample inputs' : 'Server-configured HTTP gateway'} · Weight ${esc(p.weight)}</p><button class="button secondary" data-provider="${p.id}">Configure ↗</button></article>`).join('') || empty('No providers configured','Add a sample or HTTP provider.');
         $('provider-usage').innerHTML = `<div class="section-heading ledger-heading"><h2>Provider activity</h2></div>${usage.data.length ? `<div class="table-wrap"><table><thead><tr><th>Source</th><th>Calls + cache reads</th><th>Cache hits</th><th>Failures</th><th>Average latency</th></tr></thead><tbody>${usage.data.map(s => `<tr><td>${esc(s.source)}</td><td>${s.calls}</td><td>${s.cache_hits}</td><td>${s.failures}</td><td>${number(s.average_ms,0)} ms</td></tr>`).join('')}</tbody></table></div>` : empty('No external requests yet','Sample predictions do not make network requests. Gateway and fixture-feed activity appears here.')}<div class="table-wrap"><table><thead><tr><th>Time</th><th>Source / operation</th><th>Status</th><th>HTTP</th><th>Duration</th></tr></thead><tbody>${usage.recent.map(c => `<tr><td>${esc(when(c.created_at))}</td><td>${esc(c.source)} / ${esc(c.operation)}</td><td>${esc(c.status)}</td><td>${c.http_status ?? '—'}</td><td>${c.duration_ms} ms</td></tr>`).join('') || '<tr><td colspan="5">No calls recorded.</td></tr>'}</tbody></table></div><h2 class="ledger-heading">Fixture synchronization</h2><div class="list-panel">${usage.syncs.map(s => `<div class="list-row"><div>Sync #${s.id}<small>${esc(when(s.created_at))} · ${s.imported} fixtures imported${s.error ? ` · ${esc(s.error)}` : ''}</small></div>${badge(s.status)}</div>`).join('') || empty('No synchronization runs','Configure FOOTBALL_DATA_TOKEN on the server, then sync fixtures.')}</div>`;
+        }, {quiet});
     }
     async function fillTeams() {
         const league = $('fixture-league').value;
@@ -165,8 +226,9 @@
     function bindForm(id, handler) {
         $(id).addEventListener('submit',async event => {
             event.preventDefault(); const form = event.currentTarget, button = form.querySelector('button[type=submit], button.primary');
-            const errorEl = form.querySelector('.form-error'); errorEl.textContent = ''; button.disabled = true;
-            try { await handler(form); } catch(error) { errorEl.textContent = error.message; } finally { button.disabled = false; }
+            const errorEl = form.querySelector('.form-error'); errorEl.textContent = '';
+            const restore = buttonLoading(button, id === 'login-form' ? 'Signing in…' : id === 'register-form' ? 'Creating workspace…' : 'Saving…');
+            try { await handler(form); } catch(error) { errorEl.textContent = error.message; } finally { restore(); }
         });
     }
     bindForm('login-form',async form => {
@@ -193,6 +255,10 @@
         try {
             if (target.hasAttribute('data-close')) target.closest('dialog').close();
             else if (target.dataset.tab) setTab(target.dataset.tab);
+            else if (target.dataset.retry) {
+                const retries = {fixtures:loadFixtures,predictions:loadPrivate,ledger:loadPrivate,performance:loadPerformance,providers:loadProviders,'provider-usage':loadProviders,'detail-body':() => openFixture(state.detailTarget.id,state.detailTarget.predictionId)};
+                await retries[target.dataset.retry]?.();
+            }
             else if (target.hasAttribute('data-signin')) $('auth-dialog').showModal();
             else if (target.dataset.fixture) await openFixture(Number(target.dataset.fixture));
             else if (target.dataset.prediction) { const p = state.predictions.find(p => p.id === Number(target.dataset.prediction)); await openFixture(p.fixture_id,p.id); }
@@ -218,30 +284,32 @@
     });
     $('show-register').onclick = () => { $('auth-dialog').close(); $('register-dialog').showModal(); };
     $('company').onchange = async () => { state.company=Number($('company').value); state.epoch++; state.historyPage=1; state.predictions=[]; state.detailVersion++; $('detail-dialog').close(); renderIdentity(); $('prediction-count').textContent = $('credit-count').textContent = '…'; $('predictions').innerHTML = $('ledger').innerHTML = empty('Loading company data…',''); $('performance').innerHTML = ''; renderFixtures(); try { await loadPrivate(); if(state.tab==='performance') await loadPerformance(); } catch(error) { notice(error.message,true); } };
-    $('filters').onsubmit = event => { event.preventDefault(); state.page=1; loadFixtures().catch(error => notice(error.message,true)); };
+    $('filters').onsubmit = async event => { event.preventDefault(); state.page=1; const restore=buttonLoading($('filters').querySelector('button'),'Finding matches…'); try { await loadFixtures(); } catch(error) { notice(error.message,true); } finally { restore(); } };
     for (const [id,delta] of [['fixtures-prev',-1],['fixtures-next',1]]) $(id).onclick = () => { state.page+=delta; loadFixtures().catch(error => notice(error.message,true)); };
     for (const [id,delta] of [['predictions-prev',-1],['predictions-next',1]]) $(id).onclick = () => { state.historyPage+=delta; loadPrivate().catch(error => notice(error.message,true)); };
-    $('refresh-predictions').onclick = () => loadPrivate().catch(error => notice(error.message,true));
+    $('refresh-predictions').onclick = async () => { const restore=buttonLoading($('refresh-predictions'),'Refreshing…'); try { await loadPrivate(); } catch(error) { notice(error.message,true); } finally { restore(); } };
     $('quality').onchange = () => loadPerformance().catch(error => notice(error.message,true));
     $('topup-button').onclick = () => { $('topup-form').querySelector('.form-error').textContent=''; $('topup-dialog').showModal(); };
     $('new-provider').onclick = () => { $('provider-form').reset(); $('provider-form').elements.id.value=''; $('provider-form').querySelector('.form-error').textContent=''; $('provider-dialog').showModal(); };
-    $('new-fixture').onclick = async () => { try { await fillTeams(); $('fixture-form').querySelector('.form-error').textContent=''; $('fixture-dialog').showModal(); } catch(error) { notice(error.message,true); } };
+    $('new-fixture').onclick = async () => { const restore=buttonLoading($('new-fixture'),'Loading teams…'); try { await fillTeams(); $('fixture-form').querySelector('.form-error').textContent=''; $('fixture-dialog').showModal(); } catch(error) { notice(error.message,true); } finally { restore(); } };
     $('fixture-league').onchange = () => fillTeams().catch(error => notice(error.message,true));
-    $('sync-fixtures').onclick = async () => { $('sync-fixtures').disabled=true; try { await api('/api/v1/fixtures/sync',{method:'POST',data:{}}); await loadProviders(); notice('Fixture synchronization queued.'); } catch(error) { notice(error.message,true); } finally { $('sync-fixtures').disabled=false; } };
+    $('sync-fixtures').onclick = async () => { const restore = buttonLoading($('sync-fixtures'),'Queuing sync…'); try { await api('/api/v1/fixtures/sync',{method:'POST',data:{}}); await loadProviders(); notice('Fixture synchronization queued.'); } catch(error) { notice(error.message,true); } finally { restore(); } };
     $('today').innerHTML = `YOUR MATCHDAY BRIEFING<br><strong>${esc(new Date().toLocaleDateString([], {weekday:'long',month:'short',day:'numeric'}))}</strong>`;
     async function poll() {
         if (!state.company || document.hidden || state.polling) return;
         state.polling=true; const version=state.detailVersion, epoch=state.epoch;
         try {
             if ($('detail-dialog').open && state.prediction?.status === 'pending') {
-                const response=await api(companyPath(`/predictions/${state.prediction.id}`));
+                const response=await api(companyPath(`/predictions/${state.prediction.id}`),{background:true});
                 if (epoch===state.epoch && version===state.detailVersion) { state.prediction=response.data; renderDetail(); }
             }
-            if (state.predictions.some(p=>p.status==='pending')) await loadPrivate();
-            if (state.tab==='providers') await loadProviders();
+            if (state.predictions.some(p=>p.status==='pending')) await loadPrivate({quiet:true});
+            if (state.tab==='providers') await loadProviders({quiet:true});
         } catch(error) { if(error.status===401) { notice('Your session expired. Sign in again.',true); state.company=null; } }
         finally { state.polling=false; }
     }
-    (async () => { try { await Promise.all([loadIdentity(),loadLeagues(),loadFixtures()]); await loadPrivate(); } catch(error) { notice(error.message,true); $('fixtures').innerHTML=empty('Unable to load the workspace','Reload the page to try again.'); } })();
+    $('fixtures').innerHTML = skeleton('Loading your match center…',true);
+    $('fixtures').setAttribute('aria-busy','true');
+    (async () => { try { await Promise.all([loadIdentity(),loadLeagues()]); await Promise.all([loadFixtures(),loadPrivate()]); } catch(error) { notice(error.message,true); if (!$('fixtures').querySelector('.load-error')) { $('fixtures').innerHTML=empty('Unable to load the workspace','Reload the page to try again.'); $('fixtures').setAttribute('aria-busy','false'); } } })();
     setInterval(poll,4000);
 })();

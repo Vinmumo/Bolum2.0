@@ -10,6 +10,7 @@
     <script src="/assets/dashboard.js" defer></script>
 </head>
 <body>
+<div id="network-status" class="network-status" role="status" hidden><span class="loading-spinner" aria-hidden="true"></span> Updating…</div>
 <div class="app-shell">
     <aside class="sidebar">
         <a class="brand" href="/" aria-label="Bolum home"><span class="brand-mark">b<span></span></span>bolum<span class="brand-dot">.</span></a>
@@ -36,8 +37,8 @@
                 <article class="metric balance-metric"><div>Available credits <span>◎</span></div><strong id="credit-count">—</strong><small>1 credit per prediction <button id="topup-button" hidden>Add credits ↗</button></small></article>
             </section>
             <section id="matches-panel" class="tab-panel">
-                <div class="section-heading"><div><h2>Match center <span class="tag">FIXTURES</span></h2><p>Your next match starts here.</p></div><button id="new-fixture" class="button secondary admin-only" hidden>+ Add fixture</button></div>
-                <form id="filters" class="filters"><label class="search"><span aria-hidden="true">⌕</span><input id="search" name="q" placeholder="Search for a team…" aria-label="Search teams" maxlength="100"></label><label><span class="sr-only">League</span><select id="league-filter" name="league_id"><option value="">All leagues</option></select></label><label><span class="sr-only">Fixture status</span><select name="status" id="status-filter"><option value="">All matches</option><option value="scheduled">Scheduled</option><option value="live">Live</option><option value="finished">Finished</option><option value="postponed">Postponed</option><option value="cancelled">Cancelled</option></select></label><button class="button secondary" type="submit">Apply filters</button></form>
+                <div class="section-heading"><div><h2>Match center <span class="tag">FIXTURES</span></h2><p id="fixture-context">Your next match starts here.</p></div><button id="new-fixture" class="button secondary admin-only" hidden>+ Add fixture</button></div>
+                <form id="filters" class="filters"><label class="search"><span aria-hidden="true">⌕</span><input id="search" name="q" placeholder="Search for a team…" aria-label="Search teams" maxlength="100"></label><label><span class="sr-only">League</span><select id="league-filter" name="league_id"><option value="">All leagues</option></select></label><label><span class="sr-only">Fixture status</span><select name="status" id="status-filter"><option value="upcoming">Upcoming</option><option value="">All matches</option><option value="scheduled">Scheduled</option><option value="live">Live</option><option value="finished">Finished</option><option value="postponed">Postponed</option><option value="cancelled">Cancelled</option></select></label><button class="button secondary" type="submit">Apply filters</button></form>
                 <div id="fixtures" class="fixture-grid" aria-live="polite"><div class="empty">Loading fixtures…</div></div>
                 <div class="pagination"><span id="fixture-page-label"></span><div><button id="fixtures-prev" class="button secondary">← Previous</button><button id="fixtures-next" class="button secondary">Next →</button></div></div>
             </section>

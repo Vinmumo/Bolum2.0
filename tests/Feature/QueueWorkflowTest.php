@@ -48,6 +48,6 @@ class QueueWorkflowTest extends TestCase
         }
         $this->assertDatabaseHas('predictions', ['id' => $id, 'status' => 'failed']);
         $this->assertDatabaseCount('failed_jobs', 1);
-        $this->assertSame(10,$company->fresh()->credits);
+        $this->assertSame(10, $company->fresh()->credits);
     }
 }

@@ -9,6 +9,8 @@ class Provider extends Model
 {
     use HasFactory;
 
+    protected $attributes = ['is_active' => true, 'weight' => 1];
+
     protected $fillable = ['name', 'driver', 'weight', 'is_active'];
 
     protected function casts(): array

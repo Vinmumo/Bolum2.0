@@ -27,3 +27,6 @@ Homestead.yaml
 Thumbs.db
 
 /.agents
+
+/test-results/
+/playwright-report/

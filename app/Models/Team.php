@@ -10,7 +10,7 @@ class Team extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['league_id', 'name'];
+    protected $fillable = ['source', 'external_id', 'league_id', 'name'];
 
     protected function casts(): array
     {

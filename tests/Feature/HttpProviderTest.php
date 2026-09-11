@@ -4,11 +4,14 @@ namespace Tests\Feature;
 
 use App\Exceptions\ProviderUnavailable;
 use App\Services\Providers\HttpFootballProvider;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class HttpProviderTest extends TestCase
 {
+    use RefreshDatabase;
+
     public function test_gateway_is_faked_validated_and_cached(): void
     {
         config(['football.gateway_url' => 'https://football.example.test/expected-goals']);
@@ -28,7 +31,7 @@ class HttpProviderTest extends TestCase
             app(HttpFootballProvider::class)->expectedGoals(['id' => 2]);
             $this->fail('Expected provider failure.');
         } catch (ProviderUnavailable $e) {
-            $this->assertSame('Football gateway unavailable.', $e->getMessage());
+            $this->assertSame('Football provider unavailable or returned invalid data.', $e->getMessage());
             $this->assertNull($e->getPrevious());
         }
         Http::assertSentCount(2);

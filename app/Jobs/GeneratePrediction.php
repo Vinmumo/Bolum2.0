@@ -43,7 +43,7 @@ class GeneratePrediction implements ShouldQueue
         DB::transaction(function () use ($result) {
             $prediction = Prediction::where('company_id', $this->companyId)->lockForUpdate()->findOrFail($this->predictionId);
             if ($prediction->status === PredictionStatus::Pending) {
-                $prediction->update(['status' => PredictionStatus::Completed, 'result' => $result]);
+                $prediction->update(['status' => PredictionStatus::Completed, 'result' => $result, 'completed_at' => now()]);
             }
         }, 3);
     }

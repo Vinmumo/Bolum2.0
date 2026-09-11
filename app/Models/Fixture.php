@@ -17,11 +17,13 @@ class Fixture extends Model
         return $this->hasMany(Prediction::class);
     }
 
-    protected $fillable = ['league_id', 'home_team_id', 'away_team_id', 'kickoff_at', 'is_finished'];
+    protected $attributes = ['status' => 'scheduled', 'is_finished' => false];
+
+    protected $fillable = ['source', 'external_id', 'league_id', 'home_team_id', 'away_team_id', 'kickoff_at', 'is_finished', 'season', 'matchday', 'status', 'home_goals', 'away_goals', 'result_recorded_at'];
 
     protected function casts(): array
     {
-        return ['kickoff_at' => 'immutable_datetime', 'is_finished' => 'boolean'];
+        return ['home_goals' => 'integer', 'away_goals' => 'integer', 'result_recorded_at' => 'immutable_datetime', 'kickoff_at' => 'immutable_datetime', 'is_finished' => 'boolean'];
     }
 
     public function league(): BelongsTo
@@ -41,6 +43,6 @@ class Fixture extends Model
 
     public function scopeUpcoming(Builder $query): Builder
     {
-        return $query->where('kickoff_at', '>', now())->where('is_finished', false)->orderBy('kickoff_at');
+        return $query->where('kickoff_at', '>', now())->where('is_finished', false)->where('status', 'scheduled')->orderBy('kickoff_at');
     }
 }

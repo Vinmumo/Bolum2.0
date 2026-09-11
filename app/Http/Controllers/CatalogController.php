@@ -22,7 +22,7 @@ class CatalogController extends Controller
     {
         $model = $this->model($request->route()->defaults['catalog']);
 
-        return CatalogResource::collection($model::query()->orderBy('id')->paginate($request->integer('per_page', 15)));
+        return CatalogResource::collection($model::query()->when($model === Team::class && $request->filled('league_id'), fn ($q) => $q->where('league_id', $request->integer('league_id')))->orderBy('id')->paginate($request->integer('per_page', 15)));
     }
 
     public function store(CatalogRequest $request)

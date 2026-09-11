@@ -4,7 +4,11 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\CatalogController;
 use App\Http\Controllers\CreditController;
 use App\Http\Controllers\FixtureController;
+use App\Http\Controllers\FixtureResultController;
+use App\Http\Controllers\FixtureSyncController;
+use App\Http\Controllers\PerformanceController;
 use App\Http\Controllers\PredictionController;
+use App\Http\Controllers\ProviderUsageController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function () {
@@ -35,3 +39,9 @@ Route::prefix('v1/companies/{company}')->middleware(['auth:sanctum', 'company.me
     Route::get('fixtures/{fixture}/predictions', [PredictionController::class, 'history']);
     Route::get('fixtures/{fixture}/predictions/latest', [PredictionController::class, 'latest']);
 });
+
+Route::get('v1/providers/usage', ProviderUsageController::class)->middleware(['auth:sanctum', 'can:manage-catalog']);
+
+Route::post('v1/fixtures/sync', FixtureSyncController::class)->middleware(['auth:sanctum', 'can:manage-catalog', 'throttle:predictions']);
+Route::put('v1/fixtures/{fixture}/result', FixtureResultController::class)->middleware(['auth:sanctum', 'can:manage-catalog']);
+Route::get('v1/companies/{company}/performance', PerformanceController::class)->middleware(['auth:sanctum', 'company.member']);

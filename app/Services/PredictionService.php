@@ -23,12 +23,12 @@ class PredictionService
 
                 return $existing;
             }
-            $fixture = Fixture::findOrFail($fixture->id);
-            abort_if($fixture->is_finished || $fixture->kickoff_at->isPast(), 409, 'Predictions require an upcoming fixture.');
+            $fixture = Fixture::with(['homeTeam', 'awayTeam'])->findOrFail($fixture->id);
+            abort_if($fixture->status !== 'scheduled' || $fixture->is_finished || $fixture->kickoff_at->isPast(), 409, 'Predictions require an upcoming fixture.');
             abort_if($company->credits < 1, 409, 'Insufficient demo credits.');
             $providers = Provider::where('is_active', true)->orderBy('id')->get(['id', 'name', 'driver', 'weight'])->toArray();
             abort_if(! $providers, 409, 'No active providers.');
-            $prediction = $company->predictions()->create(['status' => PredictionStatus::Pending, 'fixture_id' => $fixture->id, 'user_id' => $user->id, 'idempotency_key' => $key, 'provider_snapshot' => $providers, 'fixture_snapshot' => $fixture->only(['id', 'league_id', 'home_team_id', 'away_team_id', 'kickoff_at'])]);
+            $prediction = $company->predictions()->create(['status' => PredictionStatus::Pending, 'fixture_id' => $fixture->id, 'user_id' => $user->id, 'idempotency_key' => $key, 'provider_snapshot' => $providers, 'fixture_snapshot' => [...$fixture->only(['id', 'league_id', 'home_team_id', 'away_team_id', 'kickoff_at']), 'home_name' => $fixture->homeTeam->name, 'away_name' => $fixture->awayTeam->name]]);
             $company->decrement('credits');
             $company->creditEntries()->create(['user_id' => $user->id, 'prediction_id' => $prediction->id, 'idempotency_key' => 'debit:'.$prediction->id, 'kind' => 'prediction_debit', 'amount' => -1, 'balance_after' => $company->credits]);
             GeneratePrediction::dispatch($company->id, $prediction->id)->afterCommit();

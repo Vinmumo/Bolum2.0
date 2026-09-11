@@ -7,10 +7,27 @@
     const when = (date) => new Date(date).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
     const badge = (status) => `<span class="status ${esc(status)}">${esc(status)}</span>`;
     const initials = (name) => name.split(' ').slice(0,2).map(x => x[0]).join('').toUpperCase();
+    const failedCrests = new Set();
+    function teamBadge(team, away = false) {
+        const url = typeof team.crest_url === 'string' && /^https:\/\/crests\.football-data\.org\/[a-z0-9_-]+\.(png|svg|webp)$/i.test(team.crest_url) ? team.crest_url : null;
+        return `<span class="team-badge${away ? ' away' : ''}${url ? ' team-logo' : ''}" aria-hidden="true"><span class="crest-fallback">${esc(initials(team.name))}</span>${url && !failedCrests.has(url) ? `<img class="team-crest" src="${esc(url)}" alt="" width="48" height="48" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : ''}</span>`;
+    }
+    document.addEventListener('load', event => {
+        const img = event.target;
+        if (!(img instanceof HTMLImageElement) || !img.classList.contains('team-crest')) return;
+        img.classList.add('loaded'); img.previousElementSibling.hidden = true;
+    }, true);
+    document.addEventListener('error', event => {
+        const img = event.target;
+        if (!(img instanceof HTMLImageElement) || !img.classList.contains('team-crest')) return;
+        failedCrests.add(img.getAttribute('src'));
+        img.previousElementSibling.hidden = false; img.remove();
+    }, true);
+
     const state = {user:null,companies:[],company:null,epoch:0,fixtures:[],leagues:[],predictions:[],providers:[],page:1,historyPage:1,tab:'matches',selected:null,prediction:null,detailVersion:0,keys:new Map(),polling:false};
     let csrf = document.querySelector('meta[name="csrf-token"]').content;
     let toastTimer;
-    let fixtureRequest = 0, privateRequest = 0, performanceRequest = 0, providerRequest = 0;
+    let fixtureRequest = 0, privateRequest = 0, performanceRequest = 0, providerRequest = 0, standingsRequest = 0;
     let loadingVersion = 0, pendingRequests = 0, networkTimer;
     const buttonStates = new WeakMap();
     const spinner = '<span class="loading-spinner" aria-hidden="true"></span>';
@@ -83,8 +100,9 @@
         state.tab = tab;
         document.querySelectorAll('[data-tab]').forEach(el => { const active = el.dataset.tab === tab; el.classList.toggle('active',active); el.setAttribute('aria-current',active ? 'page' : 'false'); el.setAttribute('aria-controls',`${el.dataset.tab}-panel`); });
         document.querySelectorAll('.tab-panel').forEach(el => el.hidden = el.id !== `${tab}-panel`);
-        const headings = {matches:['Match center','A better view of the game','Explore the fixtures. Find the probabilities. Follow the results.'],predictions:['Predictions','Every prediction. One place','A clear record of your company’s requests and outcomes.'],performance:['Performance','Let the results speak','Evaluate what was predicted before the final whistle.'],providers:['Data sources','Know your sources','Manage your providers and keep an eye on their performance.']};
+        const headings = {standings:['League table','The season in perspective','Follow the standings, then explore each match in context.'],matches:['Match center','A better view of the game','Explore the fixtures. Find the probabilities. Follow the results.'],predictions:['Predictions','Every prediction. One place','A clear record of your company’s requests and outcomes.'],performance:['Performance','Let the results speak','Evaluate what was predicted before the final whistle.'],providers:['Data sources','Know your sources','Manage your providers and keep an eye on their performance.']};
         $('page-label').textContent = headings[tab][0]; $('page-title').innerHTML = `${headings[tab][1]}<span>.</span>`; $('page-description').textContent = headings[tab][2];
+        if (tab === 'standings') loadStandings().catch(error => notice(error.message,true));
         if (tab === 'performance') loadPerformance().catch(error => notice(error.message,true));
         if (tab === 'providers') loadProviders().catch(error => notice(error.message,true));
     }
@@ -106,7 +124,7 @@
         const latest = new Map(); state.predictions.forEach(p => { if (!latest.has(p.fixture_id)) latest.set(p.fixture_id,p); });
         $('fixtures').innerHTML = state.fixtures.map(f => {
             const prediction = latest.get(f.id);
-            return `<article class="fixture-card"><div class="card-top"><span class="league-name">${esc(f.league.name)}${f.matchday ? ` · GW ${f.matchday}` : ''}</span>${badge(f.status)}</div><div class="teams"><div><span class="team-badge">${esc(initials(f.home_team.name))}</span><span class="team-name">${esc(f.home_team.name)}</span></div><div class="versus">${f.is_finished && f.score.home !== null ? `<strong>${f.score.home} : ${f.score.away}</strong>` : 'VS'}</div><div><span class="team-badge away">${esc(initials(f.away_team.name))}</span><span class="team-name">${esc(f.away_team.name)}</span></div></div><div class="match-date">${esc(when(f.kickoff_at))} · ${f.source === 'local' ? 'Local fixture' : 'Synced fixture'}</div>${prediction?.result ? `<div class="prediction-preview">${probability(prediction.result.probabilities)}</div>` : ''}<div class="card-bottom"><span>${prediction ? `${esc(prediction.status)} prediction` : 'Explore the numbers'}</span><button data-fixture="${f.id}">View match <span>↗</span></button></div></article>`;
+            return `<article class="fixture-card"><div class="card-top"><span class="league-name">${esc(f.league.name)}${f.matchday ? ` · GW ${f.matchday}` : ''}</span>${badge(f.status)}</div><div class="teams"><div>${teamBadge(f.home_team)}<span class="team-name">${esc(f.home_team.name)}</span></div><div class="versus">${f.is_finished && f.score.home !== null ? `<strong>${f.score.home} : ${f.score.away}</strong>` : 'VS'}</div><div>${teamBadge(f.away_team,true)}<span class="team-name">${esc(f.away_team.name)}</span></div></div><div class="match-date">${esc(when(f.kickoff_at))} · ${f.source === 'local' ? 'Local fixture' : 'Synced fixture'}</div>${prediction?.result ? `<div class="prediction-preview">${probability(prediction.result.probabilities)}</div>` : ''}<div class="card-bottom"><span>${prediction ? `${esc(prediction.status)} prediction` : 'Explore the numbers'}</span><button data-fixture="${f.id}">View match <span>↗</span></button></div></article>`;
         }).join('') || empty('No fixtures found','Try another league or status filter.');
     }
     async function loadFixtures() {
@@ -134,7 +152,28 @@
         $('league-filter').innerHTML = '<option value="">All leagues</option>' + options; $('fixture-league').innerHTML = options;
         const preferred = state.leagues.find(l => l.source === 'football-data');
         $('league-filter').value = state.catalogLoaded ? previous : String(preferred?.id || '');
+        $('standings-league').innerHTML = state.leagues.filter(l => l.source === 'football-data').map(l => `<option value="${l.id}">${esc(l.name)}</option>`).join('') || '<option value="">No imported leagues</option>';
         state.catalogLoaded = true;
+        if (state.tab === 'standings') await loadStandings();
+    }
+    async function loadStandings() {
+        const requestId = ++standingsRequest, league = $('standings-league').value;
+        if (!league) { $('standings').innerHTML = empty('No league table available','Import a league from football-data.org to view its standings.'); return; }
+        return withLoading(['standings'], 'Fetching the league table…', async () => {
+            const response = await api(`/api/v1/leagues/${league}/standings`);
+            if (requestId !== standingsRequest || league !== $('standings-league').value) return;
+            const r = response.data;
+            $('standings').innerHTML = `<p class="panel-note">${esc(r.league_name)} · ${r.season}/${String(Number(r.season)+1).slice(-2)} · football-data.org · Fetched ${esc(when(r.fetched_at))}. Updates are cached for 10 minutes.</p><div class="table-wrap standings-wrap" tabindex="0" role="region" aria-label="League standings, scroll horizontally for all columns"><table class="standings-table"><caption class="sr-only">${esc(r.league_name)} standings</caption><thead><tr>${['Pos','Club','P','W','D','L','GF','GA','GD','Pts'].map(h => `<th scope="col">${h}</th>`).join('')}</tr></thead><tbody>${r.rows.map(row => `<tr><td class="table-position">${row.position}</td><th scope="row"><span class="table-club">${teamBadge(row.team)}<span>${esc(row.team.name)}</span></span></th>${['played','won','drawn','lost','goals_for','goals_against','goal_difference'].map(k => `<td>${row[k]}</td>`).join('')}<td class="table-points">${row.points}</td></tr>`).join('')}</tbody></table></div><p class="panel-note">P: played · W/D/L: wins, draws, losses · GF/GA: goals for/against · GD: goal difference · Pts: points. Positions and points follow the provider’s table.</p>`;
+        });
+    }
+    function sourceEvidence(source) {
+        const e = source.evidence;
+        if (!e) return '';
+        return `<div class="model-evidence"><p><strong>Based on recorded results</strong> · ${e.league_matches} league matches in the last year. Home team: ${e.home_matches} matches (${e.home_venue_matches} at home). Away team: ${e.away_matches} matches (${e.away_venue_matches} away).</p><p>Inputs saved ${esc(when(e.cutoff_at))} · ${esc(e.model_version)}. Recent matches carry more weight; small samples are smoothed toward league averages.</p>${e.limited_sample ? '<p class="sample-caution">Limited venue history: fewer than five matches for at least one team.</p>' : ''}<p>This score-based estimate does not use shot-based xG, injuries or lineups. Forecasting accuracy has not yet been established.</p></div>`;
+    }
+    function recentForm(fixture) {
+        if (fixture.source !== 'football-data' || !state.form) return '';
+        return `<div class="detail-block recent-form"><h3>Recent form</h3><p>Latest recorded league matches first · before ${esc(when(state.form.cutoff_at))}.</p><div class="form-grid">${['home','away'].map(side => `<section><h4>${esc(fixture[side+'_team'].name)}</h4>${state.form[side]?.length ? `<ol class="form-results">${state.form[side].map(m => `<li><span class="form-outcome outcome-${esc(m.outcome)}" aria-label="${{W:'Win',D:'Draw',L:'Loss'}[m.outcome]}">${esc(m.outcome)}</span><div><strong>${m.goals_for}–${m.goals_against}</strong> vs ${esc(m.opponent)}<small>${esc(m.venue)} · ${esc(when(m.kickoff_at))}</small></div></li>`).join('')}</ol>` : '<p>No eligible results recorded yet. Form appears as results are imported.</p>'}</section>`).join('')}</div></div>`;
     }
     async function loadPrivate({quiet = false} = {}) {
         if (quiet && $('predictions').getAttribute('aria-busy') === 'true') return;
@@ -162,7 +201,7 @@
         if (!$('detail-dialog').open) $('detail-dialog').showModal();
         return withLoading(['detail-body'], 'Loading match analysis…', async () => {
         const fixture = await api(`/api/v1/fixtures/${id}`); if (version !== state.detailVersion) return;
-        state.selected = fixture.data;
+        state.selected = fixture.data; state.form = fixture.form;
         if (state.company) {
             const response = await api(companyPath(predictionId ? `/predictions/${predictionId}` : `/fixtures/${id}/predictions?per_page=1`));
             if (version !== state.detailVersion) return;
@@ -175,19 +214,20 @@
         const f = state.selected, p = state.prediction; if (!f) return;
         $('detail-title').textContent = `${f.home_team.name} vs ${f.away_team.name}`;
         const canPredict = f.status === 'scheduled' && new Date(f.kickoff_at) > new Date();
-        let html = `<div class="detail-meta">${esc(f.league.name)} · ${esc(when(f.kickoff_at))} ${badge(f.status)}</div>`;
+        let html = `<div class="detail-clubs"><div>${teamBadge(f.home_team)}<strong>${esc(f.home_team.name)}</strong></div><span class="versus">VS</span><div>${teamBadge(f.away_team,true)}<strong>${esc(f.away_team.name)}</strong></div></div><div class="detail-meta">${esc(f.league.name)} · ${esc(when(f.kickoff_at))} ${badge(f.status)}</div>`;
         if (p) html += `<p>Prediction #${p.id} · ${esc(when(p.created_at))} ${badge(p.status)}</p>`;
         if (p?.status === 'pending') html += `<div class="notice queued-state" role="status">${spinner}<div><strong>Your prediction is queued.</strong><br>This page updates automatically when it is ready.</div></div>`;
         if (p?.status === 'failed') html += `<div class="notice error">${esc(p.error)}</div>`;
         if (p?.result) {
             const r = p.result;
-            html += `<p>${r.data_quality === 'sample' ? 'Synthetic sample inputs · for exploring the workflow.' : r.data_quality === 'mixed' ? 'Mixed sample and external inputs.' : 'External provider inputs.'} Model: ${esc(r.model)}.</p><div class="detail-score"><div><span>Home expected goals</span><strong>${number(r.expected_goals.home)}</strong></div><div><span>Most likely score</span><strong>${r.most_likely_score.home} : ${r.most_likely_score.away}</strong></div><div><span>Away expected goals</span><strong>${number(r.expected_goals.away)}</strong></div></div><div class="detail-block"><h3>Match outcome</h3>${probability(r.probabilities)}</div>`;
+            html += `<p>${r.data_quality === 'sample' ? 'Synthetic sample inputs · for exploring the workflow.' : r.data_quality === 'mixed' ? 'Mixed sample and external inputs.' : 'Real match data inputs.'} Model: ${esc(r.model)}.</p><div class="detail-score"><div><span>Home expected goals</span><strong>${number(r.expected_goals.home)}</strong></div><div><span>Most likely score</span><strong>${r.most_likely_score.home} : ${r.most_likely_score.away}</strong></div><div><span>Away expected goals</span><strong>${number(r.expected_goals.away)}</strong></div></div><div class="detail-block"><h3>Match outcome</h3>${probability(r.probabilities)}</div>`;
             if (r.totals) html += `<div class="detail-block"><h3>Goal probabilities</h3><div class="total-grid">${[['over_1_5','Over 1.5'],['over_2_5','Over 2.5'],['over_3_5','Over 3.5'],['both_teams_score','Both teams score']].map(([key,label]) => `<div>${label}<strong>${pct(r.totals[key])}</strong></div>`).join('')}</div></div>`;
             if (r.scorelines) html += `<div class="detail-block"><h3>Likely scorelines</h3><div class="scorelines">${r.scorelines.map(s => `<div>${s.home} : ${s.away}<small>${pct(s.probability)}</small></div>`).join('')}</div></div>`;
-            html += `<div class="detail-block"><h3>By data source</h3>${r.sources?.map(s => `<div class="source-row"><div><strong>${esc(s.name)}</strong><small>Weight ${number(s.weight)} · xG ${number(s.expected_goals.home)} / ${number(s.expected_goals.away)}</small></div>${probability(s.probabilities)}</div>`).join('') || '<p>This older prediction does not include a source breakdown.</p>'}</div>`;
+            html += `<div class="detail-block"><h3>By data source</h3>${r.sources?.map(s => `<div class="source-row"><div><strong>${esc(s.name)}</strong><small>Weight ${number(s.weight)} · Expected goals ${number(s.expected_goals.home)} / ${number(s.expected_goals.away)}</small></div>${probability(s.probabilities)}${sourceEvidence(s)}</div>`).join('') || '<p>This older prediction does not include a source breakdown.</p>'}</div>`;
         }
         if (canPredict && p?.status !== 'pending') html += `<button id="generate" class="button primary full">${state.user ? (p ? 'Generate a new prediction · 1 credit' : 'Generate prediction · 1 credit') : 'Sign in to generate a prediction →'}</button><p>Repeated delivery of the same request never spends another credit.</p>`;
         if (!p && !canPredict) html += '<p>New predictions are available only before a scheduled fixture starts.</p>';
+        html += recentForm(f);
         if (state.user?.is_admin && new Date(f.kickoff_at) <= new Date() && !['postponed','cancelled'].includes(f.status)) html += `<div class="detail-block"><h3>Record final score</h3><form id="result-form" class="result-form"><label>Home<input name="home_goals" type="number" min="0" max="100" value="${f.score.home ?? 0}" required></label><label>Away<input name="away_goals" type="number" min="0" max="100" value="${f.score.away ?? 0}" required></label><button class="button primary">Save result</button><div class="form-error" role="alert"></div></form></div>`;
         $('detail-body').innerHTML = html;
     }
@@ -221,7 +261,7 @@
         const [providers,usage] = await Promise.all([api('/api/v1/providers?per_page=100',{background:quiet}),api('/api/v1/providers/usage',{background:quiet})]);
         if (epoch !== state.epoch || !state.user?.is_admin || requestId !== providerRequest) return;
         state.providers = providers.data;
-        $('providers').innerHTML = providers.data.map(p => `<article class="fixture-card provider-card">${badge(p.is_active ? 'active' : 'paused')}<h3>${esc(p.name)}</h3><p>${p.driver === 'sample' ? 'Synthetic sample inputs' : 'Server-configured HTTP gateway'} · Weight ${esc(p.weight)}</p><button class="button secondary" data-provider="${p.id}">Configure ↗</button></article>`).join('') || empty('No providers configured','Add a sample or HTTP provider.');
+        $('providers').innerHTML = providers.data.map(p => `<article class="fixture-card provider-card">${badge(p.is_active ? 'active' : 'paused')}<h3>${esc(p.name)}</h3><p>${p.driver === 'sample' ? 'Synthetic sample inputs' : p.driver === 'results' ? 'Recorded match results · local model' : 'Server-configured HTTP gateway'} · Weight ${esc(p.weight)}</p><button class="button secondary" data-provider="${p.id}">Configure ↗</button></article>`).join('') || empty('No providers configured','Add a match-results, sample or HTTP provider.');
         $('provider-usage').innerHTML = `<div class="section-heading ledger-heading"><h2>Provider activity</h2></div>${usage.data.length ? `<div class="table-wrap"><table><thead><tr><th>Source</th><th>Calls + cache reads</th><th>Cache hits</th><th>Failures</th><th>Average latency</th></tr></thead><tbody>${usage.data.map(s => `<tr><td>${esc(s.source)}</td><td>${s.calls}</td><td>${s.cache_hits}</td><td>${s.failures}</td><td>${number(s.average_ms,0)} ms</td></tr>`).join('')}</tbody></table></div>` : empty('No external requests yet','Sample predictions do not make network requests. Gateway and fixture-feed activity appears here.')}<div class="table-wrap"><table><thead><tr><th>Time</th><th>Source / operation</th><th>Status</th><th>HTTP</th><th>Duration</th></tr></thead><tbody>${usage.recent.map(c => `<tr><td>${esc(when(c.created_at))}</td><td>${esc(c.source)} / ${esc(c.operation)}</td><td>${esc(c.status)}</td><td>${c.http_status ?? '—'}</td><td>${c.duration_ms} ms</td></tr>`).join('') || '<tr><td colspan="5">No calls recorded.</td></tr>'}</tbody></table></div><h2 class="ledger-heading">Fixture synchronization</h2><div class="list-panel">${usage.syncs.map(s => `<div class="list-row"><div>Sync #${s.id}<small>${esc(when(s.created_at))} · ${s.imported} fixtures imported${s.error ? ` · ${esc(s.error)}` : ''}</small></div>${badge(s.status)}</div>`).join('') || empty('No synchronization runs','Configure FOOTBALL_DATA_TOKEN on the server, then sync fixtures.')}</div>`;
         }, {quiet});
     }
@@ -267,8 +307,8 @@
             else if (target.dataset.tab) setTab(target.dataset.tab);
             else if (target.hasAttribute('data-match-view')) { $('status-filter').value = target.dataset.matchView; $('filters').requestSubmit(); }
             else if (target.dataset.retry) {
-                const retries = {fixtures:loadFixtures,predictions:loadPrivate,ledger:loadPrivate,performance:loadPerformance,providers:loadProviders,'provider-usage':loadProviders,'detail-body':() => openFixture(state.detailTarget.id,state.detailTarget.predictionId)};
-                await retries[target.dataset.retry]?.();
+                const retries = {standings:loadStandings,fixtures:loadFixtures,predictions:loadPrivate,ledger:loadPrivate,performance:loadPerformance,providers:loadProviders,'provider-usage':loadProviders,'detail-body':() => openFixture(state.detailTarget.id,state.detailTarget.predictionId)};
+                await retries[target.dataset.retry]?.(); $('notice').hidden = true;
             }
             else if (target.hasAttribute('data-signin')) $('auth-dialog').showModal();
             else if (target.dataset.fixture) await openFixture(Number(target.dataset.fixture));
@@ -301,6 +341,8 @@
     for (const [id,delta] of [['fixtures-prev',-1],['fixtures-next',1]]) $(id).onclick = () => { state.page+=delta; loadFixtures().catch(error => notice(error.message,true)); };
     for (const [id,delta] of [['predictions-prev',-1],['predictions-next',1]]) $(id).onclick = () => { state.historyPage+=delta; loadPrivate().catch(error => notice(error.message,true)); };
     $('refresh-predictions').onclick = async () => { const restore=buttonLoading($('refresh-predictions'),'Refreshing…'); try { await loadPrivate(); } catch(error) { notice(error.message,true); } finally { restore(); } };
+    $('standings-league').onchange = () => loadStandings().catch(error => notice(error.message,true));
+    $('refresh-standings').onclick = async () => { const restore = buttonLoading($('refresh-standings'),'Refreshing…'); try { await loadStandings(); } catch(error) { notice(error.message,true); } finally { restore(); } };
     $('quality').onchange = () => loadPerformance().catch(error => notice(error.message,true));
     $('topup-button').onclick = () => { $('topup-form').querySelector('.form-error').textContent=''; $('topup-dialog').showModal(); };
     $('new-provider').onclick = () => { $('provider-form').reset(); $('provider-form').elements.id.value=''; $('provider-form').querySelector('.form-error').textContent=''; $('provider-dialog').showModal(); };

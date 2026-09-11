@@ -10,7 +10,14 @@ class Team extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['source', 'external_id', 'league_id', 'name'];
+    protected $fillable = ['source', 'external_id', 'league_id', 'name', 'crest_url'];
+
+    public static function normalizeCrestUrl(mixed $url): ?string
+    {
+        // Only the fixture provider's public image CDN is supported; no arbitrary URLs.
+        return is_string($url) && strlen($url) <= 2048 && preg_match('~\Ahttps://crests\.football-data\.org/[a-z0-9_-]+\.(?:png|svg|webp)\z~i', $url)
+            ? $url : null;
+    }
 
     protected function casts(): array
     {

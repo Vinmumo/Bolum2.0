@@ -40,6 +40,28 @@ async function signIn(page, email = 'admin@bolum.test') {
     await expect(page.locator('#company')).toBeVisible();
 }
 
+test('official crests load on cards and details while broken images retain initials', async ({ page }) => {
+    const fixture = {
+        id:100,league:{id:1,name:'Premier League'},
+        home_team:{name:'Arsenal FC',crest_url:'https://crests.football-data.org/1.svg'},
+        away_team:{name:'Liverpool FC',crest_url:'https://crests.football-data.org/2.png'},
+        kickoff_at:new Date(Date.now()+86400000).toISOString(),status:'scheduled',is_finished:false,matchday:4,source:'football-data',score:{home:null,away:null},
+    };
+    await page.route('https://crests.football-data.org/1.svg', route => route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><circle cx="24" cy="24" r="20" fill="red"/></svg>'}));
+    await page.route('https://crests.football-data.org/2.png', route => route.abort());
+    await page.route('**/api/v1/fixtures?*', route => route.fulfill({json:{data:[fixture],meta:{total:1,current_page:1,last_page:1},links:{prev:null,next:null}}}));
+    await page.route('**/api/v1/fixtures/100', route => route.fulfill({json:{data:fixture}}));
+    await page.goto('/');
+    await expect(page.locator('#fixtures .team-crest.loaded')).toHaveCount(1);
+    await expect(page.locator('#fixtures .team-crest')).toHaveAttribute('referrerpolicy','no-referrer');
+    await expect(page.locator('#fixtures .crest-fallback').last()).toBeVisible();
+    await expect(page.locator('#fixtures .crest-fallback').last()).toHaveText('LF');
+    await page.locator('[data-fixture]').click();
+    await expect(page.locator('#detail-body .team-crest.loaded')).toHaveCount(1);
+    await expect(page.locator('#detail-body .crest-fallback').last()).toBeVisible();
+    await expect(page.locator('#detail-body')).toContainText('Arsenal FC');
+});
+
 test('dark theme is the default and the explicit light preference survives reloads', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('html')).toHaveAttribute('data-theme','dark');
@@ -253,4 +275,59 @@ test('company switching clears private history and browser registration creates 
     await expect(page.locator('#company')).toContainText('Fresh Analytics');
     await expect(page.locator('#credit-count')).toHaveText('10');
     await expect(page.locator('#predictions')).toContainText('No predictions yet');
+});
+
+test('league standings show loading, recover from errors, and fit mobile screens', async ({ page }) => {
+    await page.route('**/api/v1/leagues?*', route => route.fulfill({json:{data:[{id:2,name:'Premier League',source:'football-data'}]}}));
+    let release;
+    const gate = new Promise(resolve => release = resolve);
+    let attempts = 0;
+    await page.route('**/api/v1/leagues/2/standings', async route => {
+        if (++attempts === 1) { await gate; return route.fulfill({status:503,json:{message:'League standings are temporarily unavailable.'}}); }
+        return route.fulfill({json:{data:{league_name:'Premier League',season:2026,source:'football-data',fetched_at:new Date().toISOString(),rows:[
+            {position:1,team:{name:'Arsenal FC',crest_url:null},played:3,won:2,drawn:1,lost:0,goals_for:6,goals_against:2,goal_difference:4,points:7},
+            {position:2,team:{name:'Liverpool FC',crest_url:null},played:3,won:2,drawn:0,lost:1,goals_for:5,goals_against:3,goal_difference:2,points:6},
+        ]}}});
+    });
+    await page.goto('/');
+    await expect(page.locator('#standings-league')).toHaveValue('2');
+    await page.locator('[data-tab=standings]').click();
+    await expect(page.locator('#standings')).toHaveAttribute('aria-busy','true');
+    await expect(page.locator('#standings')).toContainText('Fetching the league table');
+    release();
+    await expect(page.locator('#standings')).toContainText('temporarily unavailable');
+    await page.locator('#standings [data-retry]').click();
+    await expect(page.locator('.standings-table tbody tr')).toHaveCount(2);
+    await expect(page.locator('.standings-table tbody tr').first()).toContainText('Arsenal FC');
+    await expect(page.locator('.table-points').first()).toHaveText('7');
+    await expect(page.locator('#notice')).not.toBeVisible();
+    await expect(page.locator('#standings')).toContainText('2026/27');
+    await page.screenshot({path:'/tmp/bolum-standings-desktop.png',fullPage:true});
+    await page.setViewportSize({width:390,height:844});
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await expect(page.locator('.standings-wrap')).toHaveAttribute('tabindex','0');
+    await page.screenshot({path:'/tmp/bolum-standings-mobile.png',fullPage:true});
+    await page.getByRole('button',{name:'Switch to light theme'}).click();
+    await expect(page.locator('.standings-table')).toBeVisible();
+});
+
+test('match form and forecast provenance explain real results without claiming shot xG', async ({ page }) => {
+    const fixture = {id:100,league:{id:2,name:'Premier League'},home_team:{name:'Arsenal FC'},away_team:{name:'Liverpool FC'},kickoff_at:new Date(Date.now()+86400000).toISOString(),status:'scheduled',is_finished:false,source:'football-data',score:{home:null,away:null}};
+    const fixtureResponse = {data:fixture,form:{cutoff_at:new Date().toISOString(),home:[{fixture_id:90,opponent:'Chelsea FC',venue:'home',goals_for:2,goals_against:0,outcome:'W',kickoff_at:new Date(Date.now()-86400000).toISOString()}],away:[]}};
+    const result = {model:'independent-poisson',data_quality:'external',expected_goals:{home:1.6,away:1.1},most_likely_score:{home:1,away:1},probabilities:{home_win:.5,draw:.25,away_win:.25},sources:[{name:'Match Results Model',driver:'results',weight:1,expected_goals:{home:1.6,away:1.1},probabilities:{home_win:.5,draw:.25,away_win:.25},evidence:{league_matches:30,home_matches:3,away_matches:3,home_venue_matches:2,away_venue_matches:1,limited_sample:true,model_version:'results-rates-v1',cutoff_at:new Date().toISOString()}}]};
+    await page.route('**/api/v1/fixtures?*', route => route.fulfill({json:{data:[fixture],meta:{total:1,current_page:1,last_page:1},links:{prev:null,next:null}}}));
+    await page.route('**/api/v1/fixtures/100', route => route.fulfill({json:fixtureResponse}));
+    await page.route('**/api/v1/companies/*/fixtures/100/predictions?*', route => route.fulfill({json:{data:[{id:100,status:'completed',created_at:new Date().toISOString(),result}]}}));
+    await signIn(page);
+    await page.locator('[data-fixture]').first().click();
+    await expect(page.locator('#detail-body')).toContainText('Real match data inputs');
+    await expect(page.locator('.model-evidence')).toContainText('30 league matches');
+    await expect(page.locator('.model-evidence')).toContainText('Limited venue history');
+    await expect(page.locator('.model-evidence')).toContainText('does not use shot-based xG');
+    await expect(page.locator('.recent-form')).toContainText('Chelsea FC');
+    await expect(page.locator('.form-outcome')).toHaveAttribute('aria-label','Win');
+    await expect(page.locator('.recent-form')).toContainText('No eligible results recorded yet');
+    await page.setViewportSize({width:390,height:844});
+    expect(await page.locator('#detail-body').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+    await page.screenshot({path:'/tmp/bolum-results-form-mobile.png',fullPage:true});
 });

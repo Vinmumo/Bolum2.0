@@ -24,6 +24,7 @@ class AppServiceProvider extends ServiceProvider
         Model::preventLazyLoading(! app()->isProduction());
         Gate::define('manage-catalog', fn (User $user) => $user->is_admin);
         RateLimiter::for('auth', fn (Request $r) => Limit::perMinute(10)->by($r->ip()));
+        RateLimiter::for('football-read', fn (Request $r) => Limit::perMinute(10)->by($r->ip()));
         RateLimiter::for('predictions', fn (Request $r) => Limit::perMinute(20)->by($r->user()?->id ?: $r->ip()));
     }
 }

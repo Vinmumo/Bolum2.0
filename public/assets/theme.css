@@ -1,4 +1,29 @@
 /* Shared color roles keep cards, dialogs, charts, and loading states in sync. */
+.standings-wrap { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.standings-table { min-width: 650px; width: 100%; font-variant-numeric: tabular-nums; }
+.standings-table th, .standings-table td { text-align: right; white-space: nowrap; }
+.standings-table th:nth-child(2), .standings-table th[scope="row"] { text-align: left; }
+.standings-table tbody th { font-weight: 500; color: var(--ink); }
+.standings-table tbody tr:hover { background: var(--hover); }
+.table-club { display: flex; align-items: center; gap: 12px; }
+.table-club .team-badge, .table-club .team-badge.team-logo { width: 32px; height: 32px; min-width: 32px; border-radius: 8px; font-size: 11px; margin: 0; }
+.table-club .team-crest { inset: 3px; width: 26px; height: 26px; }
+.table-points { font-weight: 800; color: var(--link); }
+.table-position { color: var(--muted); }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.form-grid section { min-width: 0; }
+.form-grid h4 { margin: 0 0 14px; }
+.form-results { margin: 0; padding: 0; list-style: none; }
+.form-results li { display: flex; gap: 10px; align-items: center; border-top: 1px solid var(--line); padding: 12px 0; font-size: 12px; }
+.form-results small { display: block; margin-top: 4px; color: var(--muted); text-transform: capitalize; }
+.form-outcome { display: grid; place-items: center; flex: 0 0 28px; height: 28px; border-radius: 7px; font-weight: 800; }
+.outcome-W { background: var(--success-bg); color: var(--success-text); }
+.outcome-D { background: var(--warn-bg); color: var(--warn-text); }
+.outcome-L { background: var(--error-bg); color: var(--error-text); }
+.model-evidence { padding: 12px 16px; margin-top: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.model-evidence p { margin: 6px 0; font-size: 12px; line-height: 1.7; }
+.model-evidence .sample-caution { color: var(--warn-text); }
+@media(max-width: 600px) { .form-grid { grid-template-columns: 1fr; } #standings-panel .actions { flex-wrap: wrap; } }
 :root {
     color-scheme: dark;
     --bg: #0d1512;
@@ -115,6 +140,13 @@ input::placeholder { color: var(--muted); opacity: 1; }
 .team-name { font-size: 13px; line-height: 1.5; min-height: 40px; overflow-wrap: anywhere; }
 .team-badge { background: var(--home-bg); color: var(--home); width: 46px; height: 52px; font-size: 15px; }
 .team-badge.away { background: var(--away-bg); color: var(--away); }
+.team-badge.team-logo { position: relative; clip-path: none; width: 58px; height: 58px; border-radius: 10px; background: #f0f3ed; color: #344b3d; }
+.team-crest { position: absolute; inset: 5px; width: calc(100% - 10px); height: calc(100% - 10px); object-fit: contain; opacity: 0; }
+.team-crest.loaded { opacity: 1; }
+.detail-clubs { display: grid; grid-template-columns: minmax(0,1fr) 35px minmax(0,1fr); gap: 12px; text-align: center; align-items: center; padding: 12px 0 24px; }
+.detail-clubs > div { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.detail-clubs strong { font-size: 14px; overflow-wrap: anywhere; }
+.detail-clubs .versus { padding: 0; }
 .versus { color: var(--muted); font-size: 11px; }
 .versus strong { color: var(--ink); font-size: 18px; }
 .match-date { color: var(--muted); font-size: 11px; padding: 0 12px 18px; line-height: 1.7; }

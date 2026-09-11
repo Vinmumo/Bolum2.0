@@ -43,15 +43,19 @@ This command preserves prediction history, recorded results, and existing credit
 
 The dashboard opens in dark mode. The header's theme switch saves your light/dark preference locally. Match shortcuts select upcoming, live, or finished fixtures; Reset restores the default upcoming view. Mobile fixtures use full-width cards, and loading/error states, dialogs, and charts follow the selected theme.
 
+Imported teams display their real crests on fixture cards and match details. Crests come from the football-data.org feed and load from its public image CDN, with initials as a fallback for missing or unavailable artwork. After updating, run `php artisan migrate` and `php artisan fixtures:sync` to populate existing teams' crest URLs.
+
 - **Match center:** opens on upcoming fixtures and selects an imported league when available. Search teams, filter leagues/status, browse paginated fixtures, and inspect predictions. Select All matches to include past results, or All leagues to include the local catalog. Administrators can add fixtures and record final scores after kickoff.
 - **Predictions:** company-scoped history, pending/completed/failed states, credit activity, and owner-only demo top-ups.
 - **Match analysis:** win/draw/loss probabilities, expected goals, the most likely score, five likely scorelines, goal-total probabilities, both-teams-to-score probability, and each provider's contribution.
+- **League table:** official standings with club crests, points, goals, season and fetch time. Tables are cached for ten minutes and have loading/retry states.
+- **Recent form:** up to five recorded results for each team, with venue and scores from that team’s perspective.
 - **Performance:** accuracy, multiclass Brier score, log loss, and confidence calibration against recorded results. Sample, mixed, and external inputs are reported separately.
 - **Data sources:** admin provider configuration, cache activity, latency, safe failure categories, and fixture synchronization status.
 
 The browser does not store bearer tokens in local storage. Session routes use Laravel's request-forgery protection; the client also sends its CSRF token. Company membership and action policies apply to both browser and token clients.
 
-The default prediction provider uses deterministic **synthetic inputs**. Credits are free demo units with no monetary value. Imported real fixtures do not automatically turn synthetic predictions into real-data forecasts.
+Fresh installations start with deterministic **synthetic inputs**. Enable the match-results provider after importing sufficient real results using the command below. Credits are free demo units with no monetary value. Imported real fixtures do not automatically turn synthetic predictions into real-data forecasts.
 
 ## Real fixture synchronization
 
@@ -84,6 +88,24 @@ For hourly synchronization, set `FOOTBALL_SYNC_ENABLED=true`, then run the sched
 php artisan schedule:work
 ```
 
+## Predictions from real match results
+
+After importing fixtures and final scores, run:
+
+```bash
+php artisan predictions:use-results
+```
+
+This checks the earliest upcoming imported fixture, enables the `results` provider, and pauses synthetic providers. Existing HTTP providers keep their settings. The command is repeatable. Each prediction also checks its own teams: it needs at least **20 completed league matches and 3 matches per team** recorded within the last year. Insufficient history returns a clear conflict before charging a credit; no synthetic fallback is used.
+
+The model estimates scoring rates from imported final scores using home/away attack and defence, a 90-day recency half-life, and five equivalent league-average matches to stabilize small venue samples. It then feeds Bolum's independent Poisson calculator. These are score-based expected goals, **not shot-based xG**. Estimates, counts, source fixture IDs, cutoff time, parameters and model version are frozen when the request is accepted. Workers use that snapshot even if results are corrected later.
+
+Open a match to see recent form and generate a new forecast. Existing synthetic forecasts stay labeled sample; enabling a new provider does not rewrite history. The dashboard shows the match counts and a limited-history message when either venue sample has fewer than five matches. The API categorizes a results-only prediction as `external` (shown as Real data in the dashboard). This describes the input source, not demonstrated accuracy.
+
+Standings and form reuse the existing connection. League tables come from the [competition standings endpoint](https://docs.football-data.org/general/v4/competition.html), default to the current season, and honor `FOOTBALL_SEASON` when configured. Form uses results already imported locally; it does not spend an API request per match detail. Keep `fixtures:sync` scheduled to collect new results. Historical fixtures imported today do not recreate data known before past kickoffs.
+
+For the calculation, constraints and an example, see [Prediction model](docs/PREDICTIONS.md).
+
 ## Optional expected-goals gateway
 
 The `http` prediction driver consumes a server-configured gateway. Set `FOOTBALL_GATEWAY_URL` and `FOOTBALL_GATEWAY_TOKEN`, then activate an HTTP provider in Data sources. The gateway receives `GET ?fixture_id=<Bolum ID>` and must return `{"home":1.6,"away":1.1}`. It is responsible for mapping Bolum IDs and estimating expected goals from its data. This adapter is separate from the football-data.org fixture importer.
@@ -96,9 +118,9 @@ The adapter validates positive finite goals up to 10, caches successful response
 flowchart TD
     Browser[Dashboard session or API token] --> Access[Company membership and policy]
     Access --> Request[Validated prediction request]
-    Request --> Transaction[Transaction: lock company, save prediction, debit ledger]
+    Request --> Transaction[Transaction: lock company, freeze results inputs, save prediction and debit]
     Transaction --> Queue[Queue after commit]
-    Queue --> Providers[Provider inputs outside database locks]
+    Queue --> Providers[Frozen results inputs or HTTP calls outside database locks]
     Providers --> Model[Poisson calculation and source breakdown]
     Model --> Complete[Conditional completion and completion timestamp]
     Queue --> Failure[Exhausted failure: terminal state and one refund]
@@ -144,4 +166,4 @@ Provider telemetry retains 30 days through the scheduled prune command. It store
 
 Production needs persistent storage, HTTPS, `APP_DEBUG=false`, an appropriate session domain and Sanctum stateful-domain configuration, supervised workers/scheduler, backups, monitoring, and safe migrations. Owner top-ups are demo grants, not payment processing. The independent Poisson model has not been calibrated against real outcomes.
 
-[API guide](docs/API.md) · [Example API requests](docs/api.http) · [Architecture](docs/ARCHITECTURE.md) · [Development guide](docs/DEVELOPMENT.md)
+[API guide](docs/API.md) · [Example API requests](docs/api.http) · [Architecture](docs/ARCHITECTURE.md) · [Development guide](docs/DEVELOPMENT.md) · [Data integrations](docs/INTEGRATIONS.md)

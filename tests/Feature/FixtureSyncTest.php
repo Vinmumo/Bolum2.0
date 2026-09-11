@@ -5,9 +5,11 @@ namespace Tests\Feature;
 use App\Exceptions\ProviderUnavailable;
 use App\Jobs\SyncFixtures;
 use App\Models\FixtureSync;
+use App\Models\Team;
 use App\Models\User;
 use App\Services\FixtureImporter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Laravel\Sanctum\Sanctum;
@@ -16,6 +18,35 @@ use Tests\TestCase;
 class FixtureSyncTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_crest_metadata_is_imported_exposed_and_preserved_when_optional_data_is_missing(): void
+    {
+        config(['football.data_token' => 'secret']);
+        $data = $this->payload();
+        $data['matches'][0]['homeTeam']['crest'] = 'https://crests.football-data.org/1.svg';
+        $data['matches'][0]['awayTeam']['crest'] = 'https://crests.football-data.org/2.png';
+        Http::fake(['*' => Http::response($data)]);
+        app(FixtureImporter::class)->run();
+        $this->getJson('/api/v1/fixtures?upcoming=1')->assertOk()->assertJsonPath('data.0.home_team.crest_url', 'https://crests.football-data.org/1.svg');
+        $this->getJson('/api/v1/teams')->assertOk()->assertJsonPath('data.0.crest_url', 'https://crests.football-data.org/1.svg');
+        Cache::flush();
+        Http::fake(['*' => Http::response($this->payload())]);
+        app(FixtureImporter::class)->run();
+        $this->assertDatabaseHas('teams', ['external_id' => '2021:1', 'crest_url' => 'https://crests.football-data.org/1.svg']);
+    }
+
+    public function test_untrusted_crest_urls_are_ignored_without_rejecting_the_fixture_batch(): void
+    {
+        config(['football.data_token' => 'secret']);
+        $data = $this->payload();
+        $data['matches'][0]['homeTeam']['crest'] = 'https://untrusted.example/logo.svg';
+        $data['matches'][0]['awayTeam']['crest'] = ['malformed'];
+        Http::fake(['*' => Http::response($data)]);
+        $this->assertSame(2, app(FixtureImporter::class)->run());
+        $this->assertSame(0, Team::whereNotNull('crest_url')->count());
+        Team::first()->update(['crest_url' => 'javascript:alert(1)']);
+        $this->getJson('/api/v1/teams')->assertOk()->assertJsonPath('data.0.crest_url', null);
+    }
 
     private function payload(): array
     {
@@ -37,6 +68,8 @@ class FixtureSyncTest extends TestCase
         $this->assertDatabaseCount('teams', 2);
         $this->assertDatabaseCount('leagues', 1);
         $this->assertDatabaseHas('fixtures', ['external_id' => '101', 'status' => 'finished', 'home_goals' => 2, 'away_goals' => 1, 'season' => '2026', 'matchday' => 2]);
+        $league = $this->getJson('/api/v1/leagues')->assertOk()->assertJsonPath('data.0.source', 'football-data')->json('data.0.id');
+        $this->getJson('/api/v1/fixtures?upcoming=1&league_id='.$league)->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.home_team.name', 'London')->assertJsonPath('data.0.source', 'football-data');
         Http::assertSent(fn ($r) => $r->hasHeader('X-Auth-Token', 'secret') && str_contains($r->url(), '/competitions/PL/matches'));
         Http::assertSentCount(1);
     }

@@ -11,11 +11,12 @@ Base URL: `http://127.0.0.1:8000/api/v1`. Send `Accept: application/json` and JS
 | GET | `/auth/me` | Authenticated user and memberships |
 | POST | `/auth/logout` | Revokes current token; 204 |
 | GET | `/leagues` | Public paginated list |
+| GET | `/leagues/{league}/standings` | Public imported league table; cached 10 minutes, 10 reads/minute/IP |
 | POST | `/leagues` | Admin; name and country |
 | GET | `/teams` | Public paginated list |
 | POST | `/teams` | Admin; name and league_id |
 | GET | `/fixtures` | Public paginated list; optional league_id and upcoming=1 |
-| GET | `/fixtures/{fixture}` | Public detail |
+| GET | `/fixtures/{fixture}` | Public detail plus recent `form` |
 | POST | `/fixtures` | Admin creation |
 | PUT/PATCH | `/fixtures/{fixture}` | Admin update; omitted fields retain existing values |
 | DELETE | `/fixtures/{fixture}` | Admin; 409 if prediction history exists |
@@ -62,7 +63,7 @@ Provider:
 {"name":"Sample Football","driver":"sample","weight":1,"is_active":true}
 ```
 
-Drivers: `sample` or `http`. Weight must be greater than zero and at most 100. Provider configuration never contains an API key; gateway credentials come from server environment configuration.
+Drivers: `sample`, `http`, or `results`. Weight must be greater than zero and at most 100. Provider configuration never contains an API key; gateway credentials come from server environment configuration.
 
 Prediction request: empty object `{}`, plus header `Idempotency-Key: demo-prediction-001`. The key must contain 1–100 ASCII letters, digits, underscores, or hyphens. The fixture must be upcoming. One credit is debited when the pending prediction is created; the response is `202`. Repeating the same company/user/fixture/key returns the original record with `200` and no extra charge. Reusing the key with another fixture or user returns `409`. Keys are scoped to a company.
 
@@ -79,7 +80,8 @@ Top-up: `{"amount":20}` plus `Idempotency-Key: demo-topup-001`. Amount is an int
 | 404 | Missing resource or prediction ID outside the selected company |
 | 409 | Conflicting idempotency key, insufficient credits, unavailable providers, or invalid fixture state |
 | 422 | Validation error, including incorrect login credentials |
-| 429 | Authentication or generation rate limit |
+| 429 | Authentication, generation, or standings rate limit |
+| 503 | Standings source unavailable or invalid response |
 
 Validation errors have `message` and an `errors` object keyed by field. Authentication routes allow 10 attempts per minute per IP. Generation allows 20 requests per minute per user, including replays.
 
@@ -133,3 +135,11 @@ Each HTTP retry has its own call record. Cached reads have duration zero and no 
 The response includes eligible fixture count, outcome accuracy, multiclass Brier score, log loss, five calibration buckets, and up to 20 recent evaluated predictions. Brier score is the sum of squared errors across home/draw/away, averaged over fixtures (0 is best, 2 is worst). Log loss uses the probability assigned to the actual outcome (lower is better).
 
 Within a selected data category, only the latest eligible prediction per fixture is counted. Request and completion timestamps must precede both the original snapshot kickoff and the current kickoff; team identities must still match the snapshot. Fixtures need a final score. Records missing completion/category metadata are excluded. An empty report has count zero and null aggregate scores, rather than reporting zero-error accuracy.
+
+## Standings, form and results-based forecasts
+
+`GET /leagues/{league}/standings` returns `{data: {league_id, league_name, season, source, fetched_at, rows}}`. Each row contains `position`, `team: {external_id, name, crest_url}`, `played`, `won`, `drawn`, `lost`, `goals_for`, `goals_against`, `goal_difference`, and `points`. Points are preserved from the provider, including deductions. `season` is the starting year. The configured season applies when set; otherwise the provider's current season is used. `fetched_at` is the time Bolum retrieved the table, not the provider's last score update. Cache hits keep that timestamp. Non-imported leagues return 404; missing credentials and upstream failures return a safe 503. Cup group tables are not supported.
+
+`GET /fixtures/{fixture}` additionally returns top-level `form: {cutoff_at, source, order, home, away}`. Each team has up to five eligible matches, newest first, with `fixture_id`, `kickoff_at`, `venue`, `opponent`, `goals_for`, `goals_against`, and `outcome` (W/D/L). Scores and outcomes follow that team's perspective. Eligibility requires same-league imported final results, kickoff within the last year, and result observation/update no later than the earlier of now and the viewed fixture's kickoff. Local fixtures have empty form. An empty history is not evidence of zero prior games.
+
+For an active `results` provider, prediction requests need 20 eligible league matches and 3 per team. Otherwise they return 409 without a prediction or debit. Accepted requests store `fixture_snapshot.results_inputs`; a completed result repeats those inputs under the matching source's `evidence`. This includes rates, match counts, fixture IDs, observation cutoff, model version, smoothing/decay parameters and limited-sample status. `data_quality: external` includes real-result models and configured HTTP inputs; `sample` and `mixed` remain separate. No API token is required for calculating from already imported results.

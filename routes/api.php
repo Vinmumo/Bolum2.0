@@ -9,9 +9,11 @@ use App\Http\Controllers\FixtureSyncController;
 use App\Http\Controllers\PerformanceController;
 use App\Http\Controllers\PredictionController;
 use App\Http\Controllers\ProviderUsageController;
+use App\Http\Controllers\StandingsController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function () {
+    Route::get('leagues/{league}/standings', StandingsController::class)->middleware('throttle:football-read');
     Route::middleware('throttle:auth')->group(function () {
         Route::post('auth/register', [AuthController::class, 'register']);
         Route::post('auth/login', [AuthController::class, 'login']);

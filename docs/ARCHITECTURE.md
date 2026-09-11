@@ -2,7 +2,7 @@
 
 ## Domain boundaries
 
-League has many teams and fixtures. A fixture belongs to a league, a home team, and an away team. Separate foreign keys express the two different team roles. Fixture rows are public shared data; their histories are not publicly exposed.
+League has many teams and fixtures. A fixture belongs to a league, a home team, and an away team. Separate foreign keys express the two different team roles. Fixture rows and recent match form are public shared data; company prediction histories are private.
 
 Users belong to companies through a pivot with an owner/member role. Prediction and credit records belong to exactly one company. `is_admin` is protected from registration mass assignment and grants global catalog maintenance only. Membership middleware rejects nonmembers, company-scoped queries constrain datasets, scoped bindings constrain prediction IDs, and policies decide actions. A membership check alone would not prevent an IDOR if the subsequent query were unscoped.
 
@@ -34,7 +34,7 @@ Free owner top-ups exercise transactional state changes, not payment security. A
 
 Fixture lists eager load league, home team, and away team. Feature tests compare query count for two versus twenty fixtures. All lists are bounded and paginated. Indexes support fixture league/kickoff lookups, company fixture history, and pending-work scans. Unique constraints enforce league names, team names within a league, and company-specific request/ledger keys.
 
-The HTTP cache key uses gateway URL and immutable fixture inputs. Shared caching is safe here because only public football statistics are cached. User, company, credit, and authorization data are not cached. If a future provider returns company-specific data, add company scope to both its contract and cache key.
+The HTTP cache key hashes URL, query and credentials. Shared caching is safe here because only public football statistics are cached. User, company, credit, and authorization data are not cached. If a future provider returns company-specific data, add company scope to both its contract and cache key.
 
 ## Scope decisions
 
@@ -42,7 +42,7 @@ A single explicit service orchestrates each multi-write workflow; there is no re
 
 SQLite makes setup easy. Local tests verify transaction rollback and database constraints but do not simulate simultaneous MySQL/PostgreSQL requests. MySQL CI checks engine compatibility, not a full contention workload. Production load and race testing remain follow-up work.
 
-The independent Poisson assumption omits team-strength estimation, correlated scores, injuries, calibration, and model evaluation. The sample input provider is synthetic. Those mathematical limits are separate from the reliability of the API workflow.
+The independent Poisson assumption does not model correlated scores. The results provider estimates simple venue-specific attack/defence rates; it does not incorporate shot quality, injuries, lineups, or a fitted opponent-strength model. Parameters have not been tuned or calibrated against outcomes. Prospective evaluation is available, but its presence does not establish forecast accuracy. The separate sample provider remains synthetic.
 
 ## Browser client
 
@@ -63,3 +63,11 @@ Imports are synchronous through `fixtures:sync` and queued through the admin end
 Each new completed prediction records completion time, calculated per-provider inputs/results, and the sample/mixed/external data category. `PerformanceService` evaluates frozen outcome probabilities against recorded fixture scores. It selects one latest eligible prediction per fixture and data category, using both original and current kickoff boundaries and checking team identities.
 
 This is prospective forecast evaluation, not historical feature reconstruction. Legacy records with missing metadata are excluded. Brier score, log loss, accuracy, and calibration remain separated by data category. Correcting an administrative final score recomputes the report on the next request. Large installations should materialize reports with an explicit result-version strategy.
+
+## Recorded-result model and football context
+
+`MatchHistory` centralizes the chronological rules shared by form and model inputs. Eligible matches have imported final scores in the same league, kickoff within 365 days, and result observation/update at or before the cutoff. Past detail views use their kickoff as the cutoff. A past result imported today cannot be used to claim a forecast could have known it earlier. Mutable fixture rows are not a historical feature store; corrections can remove an entry from a past form view. Already accepted forecast snapshots are unaffected.
+
+`ResultsFootballProvider` loads at most 1,000 eligible rows, requires minimum league/team samples, and produces deterministic inputs using recency weights and smoothed venue rates. `PredictionService` freezes these database-derived inputs before debiting within its transaction. The bounded database calculation performs no network I/O while the company is locked. The job later consumes only frozen inputs. HTTP drivers still make their calls outside that transaction. A provider failure never silently substitutes synthetic inputs.
+
+`StandingsService` validates the official TOTAL table, caches it for ten minutes, and uses a shared cache lock to avoid duplicate upstream calls on concurrent cache misses. Public reads have an IP rate limit. Source errors are safe/recoverable, and telemetry uses the existing sanitized logger. Historical-season tables may omit earlier administrative deductions; current tables preserve upstream points. Standings are display context and do not enter the forecast model, avoiding accidental use of today's table for earlier predictions.

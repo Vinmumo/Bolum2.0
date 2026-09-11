@@ -13,7 +13,7 @@ class CatalogResource extends JsonResource
     public function toArray(Request $request): array
     {
         return ['id' => $this->id, 'name' => $this->name, ...match (true) {
-            $this->resource instanceof League => ['country' => $this->country],$this->resource instanceof Team => ['league_id' => $this->league_id],$this->resource instanceof Provider => ['driver' => $this->driver, 'weight' => $this->weight, 'is_active' => $this->is_active],default => []
+            $this->resource instanceof League => ['country' => $this->country, 'source' => $this->source ?? 'local'],$this->resource instanceof Team => ['league_id' => $this->league_id, 'crest_url' => Team::normalizeCrestUrl($this->crest_url)],$this->resource instanceof Provider => ['driver' => $this->driver, 'weight' => $this->weight, 'is_active' => $this->is_active],default => []
         }];
     }
 }

@@ -64,7 +64,12 @@ class FixtureImporter
                     $teams = [];
                     foreach (['homeTeam', 'awayTeam'] as $side) {
                         $team = Team::firstOrNew(['source' => $source, 'external_id' => $league->external_id.':'.$match[$side]['id']]);
-                        $team->fill(['name' => $match[$side]['name'], 'league_id' => $league->id])->save();
+                        $team->fill(['name' => $match[$side]['name'], 'league_id' => $league->id]);
+                        // Incomplete optional artwork must not discard a valid fixture batch.
+                        if ($crest = Team::normalizeCrestUrl($match[$side]['crest'] ?? null)) {
+                            $team->crest_url = $crest;
+                        }
+                        $team->save();
                         $teams[] = $team;
                     }
                     $status = match ($match['status']) {

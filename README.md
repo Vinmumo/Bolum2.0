@@ -1,70 +1,109 @@
-# Bolum 2.0 — Football Predictions API
+# Bolum — Football intelligence
 
-A Laravel 13 API for football fixtures and company-owned predictions. Features include Sanctum authentication, Form Requests, Eloquent relationships, policies, tenant isolation, queues, caching, and transactional credit accounting.
+Bolum combines a Laravel 13 API with a responsive dashboard for fixtures, company-owned predictions, provider comparisons, and outcome tracking. Browser sessions use secure cookies; API clients can use Sanctum bearer tokens.
 
-The default provider generates deterministic **synthetic data**. Predictions demonstrate software architecture; they are not calibrated forecasts. Credits are free demo units, not money or a payment integration.
+## Start locally
 
-## Run locally
-
-Requires **PHP 8.4+**, Composer, and the PDO SQLite extension. The locked dependencies require PHP 8.4 even though Laravel 13 itself supports PHP 8.3. No frontend build or API key is required.
+Requires **PHP 8.4+**, Composer, and PDO SQLite. The dashboard is served directly by Laravel, so **no frontend build is needed to run it**.
 
 ```bash
 composer install
+# On first installation only:
 cp .env.example .env
 php artisan key:generate
+touch database/database.sqlite
 php artisan migrate --seed
 php artisan serve
 ```
 
-In another terminal:
+Open **http://127.0.0.1:8000**. In another terminal:
 
 ```bash
 php artisan queue:work --tries=3 --timeout=60
 ```
 
-Open `http://127.0.0.1:8000/api/v1/fixtures`. SQLite is created by Laravel when you accept the migration prompt. For noninteractive installation, create `database/database.sqlite` before migrating. The default queue and cache use database tables.
+For an existing installation, keep your `.env` and application key, run `php artisan migrate`, and restart queue workers after updating code.
 
-Local/testing seed credentials:
-
-| Account | Password | Access |
+| Local account | Password | Access |
 | --- | --- | --- |
-| `admin@bolum.test` | `password123` | Catalog administrator, Bolum Demo owner |
+| `admin@bolum.test` | `password123` | Catalog administrator and Bolum Demo owner |
 | `member@bolum.test` | `password123` | Bolum Demo member |
 
-The seeder creates four upcoming fixtures, a sample provider, 10 opening credits, and a second company for isolation demonstrations. Registration also creates a company with 10 credits. Seeding is repeatable and does not replenish spent credits. Demo accounts are not seeded in production.
+You can also register through the dashboard. Registration creates a company and grants 10 demo credits. Sample accounts are only seeded in local/testing environments.
 
-## API walkthrough
+To prepare fresh upcoming sample fixtures:
 
-1. Log in and copy your company ID and token from `data.companies` and `data.token`.
-2. Fetch a paginated fixture list, including league and team details.
-3. Submit a fixture update with identical home and away teams to inspect the `422` validation response.
-4. Request a prediction with an idempotency key; the API returns `202` and debits one credit.
-5. Repeat the request with the same key to retrieve the existing prediction without another debit.
-6. Run the worker and fetch the completed prediction.
-7. View the company's credit ledger to inspect grants, debits, and refunds.
+```bash
+php artisan demo:refresh
+```
 
-Copyable requests are in [docs/api.http](docs/api.http); the complete endpoint guide is in [docs/API.md](docs/API.md). See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for code organization and development guidance.
+This command preserves prediction history, recorded results, and existing credit balances. It reuses unused sample fixtures where possible and creates replacements when an old fixture already has history. It is blocked outside local/testing environments.
 
-## Architecture
+## In the dashboard
+
+- **Match center:** search teams, filter leagues/status, browse paginated fixtures, and inspect predictions. Administrators can add fixtures and record final scores after kickoff.
+- **Predictions:** company-scoped history, pending/completed/failed states, credit activity, and owner-only demo top-ups.
+- **Match analysis:** win/draw/loss probabilities, expected goals, the most likely score, five likely scorelines, goal-total probabilities, both-teams-to-score probability, and each provider's contribution.
+- **Performance:** accuracy, multiclass Brier score, log loss, and confidence calibration against recorded results. Sample, mixed, and external inputs are reported separately.
+- **Data sources:** admin provider configuration, cache activity, latency, safe failure categories, and fixture synchronization status.
+
+The browser does not store bearer tokens in local storage. Session routes use Laravel's request-forgery protection; the client also sends its CSRF token. Company membership and action policies apply to both browser and token clients.
+
+The default prediction provider uses deterministic **synthetic inputs**. Credits are free demo units with no monetary value. Imported real fixtures do not automatically turn synthetic predictions into real-data forecasts.
+
+## Real fixture synchronization
+
+The importer integrates with the [football-data.org competition matches endpoint](https://docs.football-data.org/general/v4/competition.html). Set these values in `.env`:
+
+```dotenv
+FOOTBALL_DATA_TOKEN=your-token
+FOOTBALL_COMPETITION=PL
+# Optional starting year; leave blank for the provider's current season.
+FOOTBALL_SEASON=
+FOOTBALL_SYNC_ENABLED=false
+```
+
+Then run:
+
+```bash
+php artisan config:clear
+php artisan fixtures:sync
+```
+
+Alternatively, an administrator can select **Sync fixtures** in Data sources; that action queues a job. Imports use upstream IDs, validate the entire payload before domain writes, and update records idempotently. League/competition context is included in team mappings so a team imported for another competition does not change earlier fixture relationships. The importer stores season, matchday, kickoff, status, and final scores.
+
+Live provider access depends on your token and competition permissions. Tests use fake HTTP responses; no live credentials are required for local development. Synchronization does not import historical model inputs or replay past predictions.
+
+For hourly synchronization, set `FOOTBALL_SYNC_ENABLED=true`, then run the scheduler:
+
+```bash
+php artisan schedule:work
+```
+
+## Optional expected-goals gateway
+
+The `http` prediction driver consumes a server-configured gateway. Set `FOOTBALL_GATEWAY_URL` and `FOOTBALL_GATEWAY_TOKEN`, then activate an HTTP provider in Data sources. The gateway receives `GET ?fixture_id=<Bolum ID>` and must return `{"home":1.6,"away":1.1}`. It is responsible for mapping Bolum IDs and estimating expected goals from its data. This adapter is separate from the football-data.org fixture importer.
+
+The adapter validates positive finite goals up to 10, caches successful responses for five minutes, uses bounded timeouts/retries, and records sanitized telemetry. Active providers' expected goals are combined using their configured weights. Each source's actual contribution is saved in the prediction result. If an active provider fails, the job retries; the application does not silently substitute sample data or omit the failed source.
+
+## How the workflow stays consistent
 
 ```mermaid
 flowchart TD
-    Request[HTTP request] --> Auth[Sanctum and company membership]
-    Auth --> Validation[Form Request and policy]
-    Validation --> Controller[Thin controller]
-    Controller --> Service[PredictionService]
-    Service --> Transaction[Transaction: lock company, create prediction, debit ledger]
-    Transaction --> Queue[Dispatch GeneratePrediction after commit]
-    Queue --> Provider[Provider contract: sample or HTTP gateway]
-    Provider --> Calculator[Independent Poisson calculator]
-    Calculator --> Result[Conditional completion transaction]
-    Queue --> Failure[Exhausted retries: mark failed and refund once]
-    Result --> Resource[API Resource]
+    Browser[Dashboard session or API token] --> Access[Company membership and policy]
+    Access --> Request[Validated prediction request]
+    Request --> Transaction[Transaction: lock company, save prediction, debit ledger]
+    Transaction --> Queue[Queue after commit]
+    Queue --> Providers[Provider inputs outside database locks]
+    Providers --> Model[Poisson calculation and source breakdown]
+    Model --> Complete[Conditional completion and completion timestamp]
+    Queue --> Failure[Exhausted failure: terminal state and one refund]
+    Complete --> History[Private history and pre-kickoff evaluation]
 ```
 
-Leagues, teams, and fixtures form a **public shared catalog**. Each company has users through a membership pivot, its own predictions, a credit balance, and an append-only application ledger. Administrators manage the catalog; company owners may top up demo credits. Admin status does not bypass company membership.
+A company-scoped idempotency key prevents repeated requests from creating another prediction or debit. Database constraints back up application checks. Jobs carry company and prediction IDs, and only pending records can transition to completed/failed. Provider and fixture snapshots preserve what was used for each prediction.
 
-Prediction detail routes use scoped bindings; lists, histories, and latest results explicitly query the selected company's relationship. Jobs carry both company and prediction IDs. Provider data is public football information, so its cache is shared and contains no company data.
+Performance reports select the latest eligible prediction per fixture within a data category. Both its request and completion must precede the original snapshotted kickoff and current kickoff. Changed team identities are excluded. Older predictions without completion timestamps or data-category metadata are excluded rather than assigned fabricated history. Scores evaluate stored forecasts; the system does not claim that retrospective access to today's statistics recreates past knowledge.
 
 ## Verify
 
@@ -74,34 +113,31 @@ vendor/bin/pint --test
 composer validate --strict
 ```
 
-Tests cover authentication, authorization, partial-update validation, pagination, constant query counts, isolation, idempotency conflicts, rollback, real database queue processing, exhausted-job refunds, faked HTTP retries/cache, and calculation invariants. GitHub Actions runs formatting and tests with SQLite and MySQL. Local verification was performed with SQLite; MySQL CI runs after you push.
-
-## Queue operations
+To run the browser suite:
 
 ```bash
-php artisan queue:work --tries=3 --timeout=60
-php artisan queue:failed
-php artisan predictions:recover
-php artisan schedule:work
+npm ci
+npx playwright install chromium
+npm run test:browser
 ```
 
-`predictions:recover` requeues pending requests older than five minutes. This covers the small gap between committing the database transaction and dispatching its job. Schedule it with Laravel's scheduler. Duplicate deliveries are safe: the worker only transitions a pending record once, and refund keys are unique. An exhausted, refunded prediction is terminal; make a new request with a new key after fixing the provider. Replaying its old failed job does not charge or regenerate it.
+For an existing local Chrome installation, set `BOLUM_CHROME_PATH=/usr/bin/google-chrome`. Browser tests start their own server on port 8012 with a new temporary SQLite database. They never reset your application's database. `BOLUM_BROWSER_PORT` can override the port.
 
-Provider and fixture snapshots preserve the inputs of a requested prediction even when an administrator later changes the catalog. HTTP calls happen outside database transactions. Jobs use three attempts, backoff, a 60-second timeout, and a cache overlap lock. Restart long-running workers after deployment with `php artisan queue:restart`.
+Tests cover token/session authentication, request-forgery protection, company isolation, validation, pagination/query counts, atomic debit rollback, duplicate requests/jobs, refunds, real worker execution, provider telemetry, idempotent imports, chronological evaluation, and desktop/mobile workflows. CI runs PHP tests with SQLite/MySQL and a separate browser job. These tests do not replace production concurrency/load testing.
 
-## Optional HTTP provider
+## Operations
 
-The sample provider works offline. An optional `http` driver consumes your own trusted expected-goals gateway; it is **not a completed API-Football integration**. Configure `FOOTBALL_GATEWAY_URL` and `FOOTBALL_GATEWAY_TOKEN` in `.env`, then add an active provider through the admin endpoint. The gateway receives `GET ?fixture_id=<Bolum fixture ID>` and must return `{"home":1.6,"away":1.1}`. It is responsible for mapping Bolum IDs to its upstream vendor IDs.
+```bash
+php artisan queue:failed
+php artisan predictions:recover
+php artisan providers:prune
+php artisan queue:restart
+```
 
-The adapter validates positive finite expected goals up to 10, caches successful responses for five minutes, times out, retries once, and turns upstream errors into safe exceptions. Active providers are combined using weighted expected goals before calculating the distribution. If any active provider fails, the job retries; it never silently substitutes synthetic data.
+The scheduler recovers pending predictions older than five minutes to cover the commit-to-enqueue crash gap. Duplicate deliveries are safe. An exhausted prediction is refunded and terminal; after fixing a provider, submit a new request with a new key. Replaying the old refunded job does not generate a free result.
 
-## Deliberate limits and production follow-up
+Provider telemetry retains 30 days through the scheduled prune command. It stores source, operation, category, HTTP status, latency, cache-hit flag, and attempt number; never credentials, upstream bodies, or raw exception messages.
 
-- This is a focused API with no frontend, real payment processing, company invitation flow, or financial ERP module.
-- Integer credits illustrate accounting without floating-point money. Owner top-ups are explicitly free demo grants. A real billing system would need verified payment events, currency rules, and independent reconciliation.
-- MySQL/PostgreSQL support row locking; SQLite is convenient for demos but does not prove concurrent row-lock behavior. Database uniqueness and conditional state transitions protect retries; load-test contention using your production engine before deployment.
-- Prediction history belongs to companies and is private. Public prediction endpoints were intentionally excluded to preserve tenant privacy.
-- No raw secrets or upstream bodies are included in provider failures. Failed jobs are operational records and should have restricted access and retention limits.
-- Before deployment, configure HTTPS, `APP_DEBUG=false`, persistent database/queue storage, scheduler and worker supervision, backups, monitoring, token cleanup, and a deployment migration strategy. For a first-party SPA, use Sanctum's cookie flow rather than persisting bearer tokens in browser storage.
+Production needs persistent storage, HTTPS, `APP_DEBUG=false`, an appropriate session domain and Sanctum stateful-domain configuration, supervised workers/scheduler, backups, monitoring, and safe migrations. Owner top-ups are demo grants, not payment processing. The independent Poisson model has not been calibrated against real outcomes.
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for transaction and isolation decisions.
+[API guide](docs/API.md) · [Example API requests](docs/api.http) · [Architecture](docs/ARCHITECTURE.md) · [Development guide](docs/DEVELOPMENT.md)

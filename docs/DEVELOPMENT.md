@@ -67,3 +67,13 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for transaction boundaries and scope deci
 - [Database transactions](https://laravel.com/docs/13.x/database)
 - [Queues](https://laravel.com/docs/13.x/queues)
 - [HTTP tests](https://laravel.com/docs/13.x/http-tests)
+
+## Dashboard development
+
+The dashboard template is `resources/views/dashboard.blade.php`, with static assets in `public/assets`. It needs no Vite build to run. The JavaScript uses same-origin cookie authentication, escapes server-provided text before HTML insertion, and uses company-scoped API routes for private data.
+
+Run browser tests with `npm ci`, `npx playwright install chromium`, and `npm run test:browser`. The Playwright configuration creates a new temporary SQLite database, seeds it, and starts an isolated server. Browser tests cover responsive navigation, cross-origin request rejection, sign-in/logout, a real queued prediction, and role-based controls.
+
+The new backend entry points are `FixtureImporter` (validated idempotent imports), `ProviderHttpClient` (safe telemetry and caching), `PerformanceService` (chronologically eligible evaluation), and `SessionController` (browser sessions). Preserve separate sample/external categories and never backdate production predictions to make historical metrics look populated.
+
+Use `demo:refresh` for fresh sample fixtures. It preserves existing history/results and balances, and is unavailable in production.

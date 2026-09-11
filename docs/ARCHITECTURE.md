@@ -43,3 +43,23 @@ A single explicit service orchestrates each multi-write workflow; there is no re
 SQLite makes setup easy. Local tests verify transaction rollback and database constraints but do not simulate simultaneous MySQL/PostgreSQL requests. MySQL CI checks engine compatibility, not a full contention workload. Production load and race testing remain follow-up work.
 
 The independent Poisson assumption omits team-strength estimation, correlated scores, injuries, calibration, and model evaluation. The sample input provider is synthetic. Those mathematical limits are separate from the reliability of the API workflow.
+
+## Browser client
+
+Laravel serves the Blade dashboard and static CSS/JavaScript directly. The client uses session cookies with Laravel's origin/CSRF protection and calls the versioned API through Sanctum's stateful middleware. Bearer-token clients remain supported independently. Login regenerates the session; logout invalidates it. No bearer tokens are persisted in browser storage.
+
+The client guards company changes so stale responses cannot render another company's data after a switch. Prediction requests keep an idempotency key for uncertain retries. Pending results are polled while the document is visible. Empty, forbidden, failed, and pending states are distinct.
+
+## Provider observability and fixture imports
+
+`ProviderHttpClient` normalizes and validates a successful response before caching it. Each network attempt and cache read receives a sanitized `provider_calls` row. Cache keys hash the URL, query, and credentials to avoid mixing configurations; credentials themselves are not stored in telemetry. Average latency includes cache reads, whose duration is zero. The scheduler prunes records after 30 days.
+
+`FixtureImporter` consumes a single configured competition from football-data.org, validates the batch, and performs domain writes in one transaction. A shared lock serializes imports. Stable source/external-ID keys make repeated imports safe. Team mappings include competition context to fit Bolum's league-to-team relationship. Upstream state distinguishes scheduled, live, finished, postponed, and cancelled matches. Only finished matches have final scores imported. No rows are deleted simply because an upstream response omits them.
+
+Imports are synchronous through `fixtures:sync` and queued through the admin endpoint. They do not replace the expected-goals gateway contract. Credentials and scheduling are opt-in; synthetic predictions continue to be labeled synthetic even when the fixture itself came from a live feed.
+
+## Evaluation boundary
+
+Each new completed prediction records completion time, calculated per-provider inputs/results, and the sample/mixed/external data category. `PerformanceService` evaluates frozen outcome probabilities against recorded fixture scores. It selects one latest eligible prediction per fixture and data category, using both original and current kickoff boundaries and checking team identities.
+
+This is prospective forecast evaluation, not historical feature reconstruction. Legacy records with missing metadata are excluded. Brier score, log loss, accuracy, and calibration remain separated by data category. Correcting an administrative final score recomputes the report on the next request. Large installations should materialize reports with an explicit result-version strategy.

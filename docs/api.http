@@ -66,3 +66,29 @@ Accept: application/json
 POST {{base}}/auth/logout
 Authorization: Bearer {{token}}
 Accept: application/json
+
+### Provider usage (admin)
+GET {{base}}/providers/usage?days=1
+Authorization: Bearer {{token}}
+Accept: application/json
+
+### Queue fixture synchronization (requires server-side football-data.org token)
+POST {{base}}/fixtures/sync
+Authorization: Bearer {{token}}
+Accept: application/json
+Content-Type: application/json
+
+{}
+
+### Record a final score (admin; kickoff must be in the past)
+PUT {{base}}/fixtures/{{fixture}}/result
+Authorization: Bearer {{token}}
+Accept: application/json
+Content-Type: application/json
+
+{"home_goals":2,"away_goals":1}
+
+### Evaluate frozen pre-kickoff sample predictions
+GET {{base}}/companies/{{company}}/performance?quality=sample
+Authorization: Bearer {{token}}
+Accept: application/json

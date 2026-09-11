@@ -79,3 +79,30 @@ test('member permissions, owner top-up, and missing provider configuration', asy
     await page.locator('#sync-fixtures').click();
     await expect(page.locator('#notice')).toContainText('Configure the football-data.org token');
 });
+
+test('company switching clears private history and browser registration creates a workspace', async ({ page }) => {
+    execFileSync('php', ['-r', `$pdo = new PDO('sqlite:'.getenv('BOLUM_BROWSER_DATABASE')); $pdo->exec("INSERT INTO company_user (company_id,user_id,role,created_at,updated_at) SELECT companies.id,users.id,'member',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP FROM companies CROSS JOIN users WHERE companies.name='Rival Analytics' AND users.email='admin@bolum.test'");`], { env: process.env });
+    await signIn(page);
+    const rival = await page.locator('#company option').filter({hasText:'Rival Analytics'}).getAttribute('value');
+    await page.locator('[data-tab=predictions]').click();
+    await page.locator('#company').selectOption(rival);
+    await expect(page.locator('#predictions')).toContainText('No predictions yet');
+    await expect(page.locator('#credit-count')).toHaveText('0');
+    await expect(page.locator('#topup-button')).not.toBeVisible();
+    await page.locator('#account').click();
+    await expect(page.locator('#account')).toContainText('Sign in');
+    await expect(page.locator('#account')).toBeEnabled();
+    await page.locator('#account').click();
+    await page.locator('#show-register').click();
+    const form = page.locator('#register-form');
+    await form.locator('[name=name]').fill('New Analyst');
+    await form.locator('[name=company_name]').fill('Fresh Analytics');
+    await form.locator('[name=email]').fill('fresh@example.test');
+    await form.locator('[name=password]').fill('long-password');
+    await form.locator('[name=password_confirmation]').fill('long-password');
+    await form.locator('button[type=submit]').click();
+    await expect(page.locator('#register-dialog')).not.toBeVisible();
+    await expect(page.locator('#company')).toContainText('Fresh Analytics');
+    await expect(page.locator('#credit-count')).toHaveText('10');
+    await expect(page.locator('#predictions')).toContainText('No predictions yet');
+});

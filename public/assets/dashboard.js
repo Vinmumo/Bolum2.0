@@ -10,6 +10,7 @@
     const state = {user:null,companies:[],company:null,epoch:0,fixtures:[],leagues:[],predictions:[],providers:[],page:1,historyPage:1,tab:'matches',selected:null,prediction:null,detailVersion:0,keys:new Map(),polling:false};
     let csrf = document.querySelector('meta[name="csrf-token"]').content;
     let toastTimer;
+    let fixtureRequest = 0, privateRequest = 0;
     function notice(message, error = false) {
         clearTimeout(toastTimer); $('notice').textContent = message; $('notice').className = `notice${error ? ' error' : ''}`; $('notice').hidden = false;
         if (!error) toastTimer = setTimeout(() => $('notice').hidden = true, 6500);
@@ -63,10 +64,11 @@
         }).join('') || empty('No fixtures found','Try another league or status filter.');
     }
     async function loadFixtures() {
+        const requestId = ++fixtureRequest;
         const params = new URLSearchParams(new FormData($('filters'))); [...params.keys()].forEach(key => { if (!params.get(key)) params.delete(key); });
         params.set('page',state.page); params.set('per_page',9);
         const page = state.page, response = await api(`/api/v1/fixtures?${params}`);
-        if (page !== state.page) return;
+        if (page !== state.page || requestId !== fixtureRequest) return;
         state.fixtures = response.data; renderFixtures(); $('fixture-count').textContent = response.meta.total;
         $('fixture-page-label').textContent = `${response.meta.total} fixtures · Page ${response.meta.current_page} of ${response.meta.last_page}`;
         $('fixtures-prev').disabled = !response.links.prev; $('fixtures-next').disabled = !response.links.next;
@@ -77,6 +79,7 @@
         $('league-filter').innerHTML = '<option value="">All leagues</option>' + options; $('fixture-league').innerHTML = options;
     }
     async function loadPrivate() {
+        const requestId = ++privateRequest;
         const epoch = state.epoch;
         if (!state.company) {
             state.predictions = []; $('prediction-count').textContent = '—'; $('credit-count').textContent = '—';
@@ -85,7 +88,7 @@
             $('prediction-page-label').textContent = ''; $('predictions-prev').disabled = $('predictions-next').disabled = true; renderFixtures(); return;
         }
         const [history,credits] = await Promise.all([api(companyPath(`/predictions?per_page=15&page=${state.historyPage}`)),api(companyPath('/credits?per_page=15'))]);
-        if (epoch !== state.epoch) return;
+        if (epoch !== state.epoch || requestId !== privateRequest) return;
         state.predictions = history.data; $('prediction-count').textContent = history.meta.total; $('credit-count').textContent = credits.balance;
         $('prediction-page-label').textContent = `Page ${history.meta.current_page} of ${history.meta.last_page}`; $('predictions-prev').disabled = !history.links.prev; $('predictions-next').disabled = !history.links.next;
         $('predictions').innerHTML = history.data.map(p => `<div class="list-row"><div><strong>${esc(p.fixture_snapshot.home_name || p.fixture?.home_team?.name || 'Home')} vs ${esc(p.fixture_snapshot.away_name || p.fixture?.away_team?.name || 'Away')}</strong><small>#${p.id} · ${esc(when(p.created_at))} · ${esc(p.result?.data_quality || 'Awaiting result')}</small></div>${badge(p.status)}<button class="button secondary" data-prediction="${p.id}">View result ↗</button></div>`).join('') || empty('No predictions yet','Open a fixture and request your first prediction.');
@@ -126,13 +129,13 @@
     }
     async function generate(button) {
         if (!state.user) { $('detail-dialog').close(); $('auth-dialog').showModal(); return; }
-        const epoch = state.epoch, f = state.selected, keyId = `${state.company}:${f.id}`;
+        const epoch = state.epoch, version = state.detailVersion, f = state.selected, keyId = `${state.company}:${f.id}`;
         const key = state.keys.get(keyId) || crypto.randomUUID(); state.keys.set(keyId,key);
         button.disabled = true; button.textContent = 'Requesting…';
         try {
             const response = await api(companyPath(`/fixtures/${f.id}/predictions`),{method:'POST',data:{},headers:{'Idempotency-Key':key}});
             state.keys.delete(keyId); if (epoch !== state.epoch) return;
-            state.prediction = response.data; renderDetail(); await loadPrivate(); notice('Prediction requested. Your result will appear here.');
+            if (version === state.detailVersion && state.selected?.id === f.id) { state.prediction = response.data; renderDetail(); } await loadPrivate(); notice('Prediction requested. Your result will appear here.');
         } catch(error) { button.disabled = false; button.textContent = 'Retry prediction request · 1 credit'; notice(error.message,true); }
     }
     async function loadPerformance() {
@@ -208,11 +211,13 @@
     });
     $('account').addEventListener('click',async () => {
         if (!state.user) { $('auth-dialog').showModal(); return; }
+        $('account').disabled = true;
         try { await api('/session/logout',{method:'POST',data:{}}); state.user=null; state.companies=[]; state.company=null; state.epoch++; state.keys.clear(); renderIdentity(); setTab('matches'); await loadPrivate(); $('providers').innerHTML = $('provider-usage').innerHTML = $('performance').innerHTML = ''; notice('You are signed out.'); }
         catch(error) { notice(error.message,true); }
+        finally { $('account').disabled = false; }
     });
     $('show-register').onclick = () => { $('auth-dialog').close(); $('register-dialog').showModal(); };
-    $('company').onchange = async () => { state.company=Number($('company').value); state.epoch++; state.historyPage=1; state.predictions=[]; state.detailVersion++; $('detail-dialog').close(); renderIdentity(); try { await loadPrivate(); if(state.tab==='performance') await loadPerformance(); } catch(error) { notice(error.message,true); } };
+    $('company').onchange = async () => { state.company=Number($('company').value); state.epoch++; state.historyPage=1; state.predictions=[]; state.detailVersion++; $('detail-dialog').close(); renderIdentity(); $('prediction-count').textContent = $('credit-count').textContent = '…'; $('predictions').innerHTML = $('ledger').innerHTML = empty('Loading company data…',''); $('performance').innerHTML = ''; renderFixtures(); try { await loadPrivate(); if(state.tab==='performance') await loadPerformance(); } catch(error) { notice(error.message,true); } };
     $('filters').onsubmit = event => { event.preventDefault(); state.page=1; loadFixtures().catch(error => notice(error.message,true)); };
     for (const [id,delta] of [['fixtures-prev',-1],['fixtures-next',1]]) $(id).onclick = () => { state.page+=delta; loadFixtures().catch(error => notice(error.message,true)); };
     for (const [id,delta] of [['predictions-prev',-1],['predictions-next',1]]) $(id).onclick = () => { state.historyPage+=delta; loadPrivate().catch(error => notice(error.message,true)); };

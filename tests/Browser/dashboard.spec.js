@@ -40,6 +40,75 @@ async function signIn(page, email = 'admin@bolum.test') {
     await expect(page.locator('#company')).toBeVisible();
 }
 
+test('dark theme is the default and the explicit light preference survives reloads', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('html')).toHaveAttribute('data-theme','dark');
+    await expect(page.getByRole('button',{name:'Switch to light theme'})).toBeVisible();
+    await page.getByRole('button',{name:'Switch to light theme'}).click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme','light');
+    await page.reload();
+    await expect(page.locator('html')).toHaveAttribute('data-theme','light');
+    await page.getByRole('button',{name:'Switch to dark theme'}).click();
+    await page.reload();
+    await expect(page.locator('html')).toHaveAttribute('data-theme','dark');
+    expect(await page.evaluate(() => Object.keys(localStorage))).toEqual(['bolum.theme']);
+});
+
+test('match shortcuts and reset keep the visible filters consistent', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('.fixture-card')).toHaveCount(4);
+    await page.getByRole('button',{name:'Results',exact:true}).click();
+    await expect(page.locator('#status-filter')).toHaveValue('finished');
+    await expect(page.getByRole('button',{name:'Results',exact:true})).toHaveAttribute('aria-pressed','true');
+    await expect(page.locator('#fixtures')).toContainText('No fixtures found');
+    await page.getByRole('button',{name:'Reset',exact:true}).click();
+    await expect(page.locator('.fixture-card')).toHaveCount(4);
+    await expect(page.getByRole('button',{name:'Upcoming',exact:true})).toHaveAttribute('aria-pressed','true');
+    await expect(page.locator('#status-filter')).toHaveValue('upcoming');
+});
+
+test('both themes keep key text readable and mobile cards usable', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('.fixture-card')).toHaveCount(4);
+    for (const theme of ['dark','light']) {
+        if (theme === 'light') await page.getByRole('button',{name:'Switch to light theme'}).click();
+        const ratios = await page.evaluate(() => {
+            const luminance = color => {
+                const values = color.match(/[\d.]+/g).slice(0,3).map(Number).map(n => { const c=n/255; return c<=.04045 ? c/12.92 : ((c+.055)/1.055)**2.4; });
+                return values[0]*.2126 + values[1]*.7152 + values[2]*.0722;
+            };
+            return ['.team-name','.match-date','.league-name','.card-bottom button','.metric small','.status.scheduled'].map(selector => {
+                const el=document.querySelector(selector); let parent=el, bg;
+                while (parent) { bg=getComputedStyle(parent).backgroundColor; if (bg!=='rgba(0, 0, 0, 0)' && bg!=='transparent') break; parent=parent.parentElement; }
+                const a=luminance(getComputedStyle(el).color), b=luminance(bg);
+                return {selector,ratio:(Math.max(a,b)+.05)/(Math.min(a,b)+.05)};
+            });
+        });
+        for (const result of ratios) expect(result.ratio,`${theme} ${result.selector}`).toBeGreaterThanOrEqual(4.5);
+        await page.setViewportSize({width:390,height:844});
+        expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+        expect(await page.locator('.fixture-card').first().evaluate(el=>el.getBoundingClientRect().width)).toBeGreaterThan(300);
+        expect(await page.locator('#league-filter').evaluate(el=>el.getBoundingClientRect().width)).toBeGreaterThan(140);
+        await page.screenshot({path:`/tmp/bolum-${theme}-mobile.png`,fullPage:true});
+        await page.setViewportSize({width:1440,height:1000});
+    }
+});
+
+test('keyboard users can skip navigation and switch theme without storage access', async ({ page }) => {
+    await page.addInitScript(() => {
+        Storage.prototype.getItem = () => { throw new Error('Storage unavailable'); };
+        Storage.prototype.setItem = () => { throw new Error('Storage unavailable'); };
+    });
+    await page.goto('/');
+    await page.keyboard.press('Tab');
+    await expect(page.getByRole('link',{name:'Skip to content'})).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#main-content')).toBeFocused();
+    await page.getByRole('button',{name:'Switch to light theme'}).focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('html')).toHaveAttribute('data-theme','light');
+});
+
 test('fixture loading holds its layout, recovers after errors, and respects reduced motion', async ({ page }) => {
     let release;
     const gate = new Promise(resolve => release = resolve);

@@ -41,7 +41,9 @@ This command preserves prediction history, recorded results, and existing credit
 
 ## In the dashboard
 
-- **Match center:** search teams, filter leagues/status, browse paginated fixtures, and inspect predictions. Administrators can add fixtures and record final scores after kickoff.
+The dashboard opens in dark mode. The header's theme switch saves your light/dark preference locally. Match shortcuts select upcoming, live, or finished fixtures; Reset restores the default upcoming view. Mobile fixtures use full-width cards, and loading/error states, dialogs, and charts follow the selected theme.
+
+- **Match center:** opens on upcoming fixtures and selects an imported league when available. Search teams, filter leagues/status, browse paginated fixtures, and inspect predictions. Select All matches to include past results, or All leagues to include the local catalog. Administrators can add fixtures and record final scores after kickoff.
 - **Predictions:** company-scoped history, pending/completed/failed states, credit activity, and owner-only demo top-ups.
 - **Match analysis:** win/draw/loss probabilities, expected goals, the most likely score, five likely scorelines, goal-total probabilities, both-teams-to-score probability, and each provider's contribution.
 - **Performance:** accuracy, multiclass Brier score, log loss, and confidence calibration against recorded results. Sample, mixed, and external inputs are reported separately.
@@ -69,6 +71,8 @@ Then run:
 php artisan config:clear
 php artisan fixtures:sync
 ```
+
+Reload the dashboard after the first import. It will select the imported league and show its next scheduled matches in kickoff order. Real team names and dates come from the feed; `demo:refresh` only prepares local sample fixtures. Keep the scheduler running for hourly updates when synchronization is enabled. After changing provider configuration in `.env`, restart existing queue workers so queued imports use the new settings.
 
 Alternatively, an administrator can select **Sync fixtures** in Data sources; that action queues a job. Imports use upstream IDs, validate the entire payload before domain writes, and update records idempotently. League/competition context is included in team mappings so a team imported for another competition does not change earlier fixture relationships. The importer stores season, matchday, kickoff, status, and final scores.
 

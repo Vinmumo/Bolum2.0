@@ -12,6 +12,7 @@
     let toastTimer;
     let fixtureRequest = 0, privateRequest = 0, performanceRequest = 0, providerRequest = 0;
     let loadingVersion = 0, pendingRequests = 0, networkTimer;
+    const buttonStates = new WeakMap();
     const spinner = '<span class="loading-spinner" aria-hidden="true"></span>';
     function networkBusy(change) {
         pendingRequests += change;
@@ -39,9 +40,17 @@
         }
     }
     function buttonLoading(button, label) {
-        const html = button.innerHTML, disabled = button.disabled;
+        const previous = buttonStates.get(button);
+        const entry = {html:previous?.html ?? button.innerHTML,disabled:previous?.disabled ?? button.disabled};
+        buttonStates.set(button,entry);
         button.disabled = true; button.setAttribute('aria-busy','true'); button.innerHTML = `${spinner}${esc(label)}`;
-        return () => { button.innerHTML = html; button.disabled = disabled; button.removeAttribute('aria-busy'); };
+        return () => {
+            if (buttonStates.get(button) !== entry) return;
+            button.innerHTML = entry.html; button.disabled = entry.disabled; button.removeAttribute('aria-busy'); buttonStates.delete(button);
+        };
+    }
+    function updateMatchViews() {
+        document.querySelectorAll('[data-match-view]').forEach(el => el.setAttribute('aria-pressed',String(el.dataset.matchView === $('status-filter').value)));
     }
     function notice(message, error = false) {
         clearTimeout(toastTimer); $('notice').textContent = message; $('notice').className = `notice${error ? ' error' : ''}`; $('notice').hidden = false;
@@ -72,7 +81,7 @@
     function setTab(tab) {
         if (tab === 'providers' && !state.user?.is_admin) return;
         state.tab = tab;
-        document.querySelectorAll('[data-tab]').forEach(el => el.classList.toggle('active', el.dataset.tab === tab));
+        document.querySelectorAll('[data-tab]').forEach(el => { const active = el.dataset.tab === tab; el.classList.toggle('active',active); el.setAttribute('aria-current',active ? 'page' : 'false'); el.setAttribute('aria-controls',`${el.dataset.tab}-panel`); });
         document.querySelectorAll('.tab-panel').forEach(el => el.hidden = el.id !== `${tab}-panel`);
         const headings = {matches:['Match center','A better view of the game','Explore the fixtures. Find the probabilities. Follow the results.'],predictions:['Predictions','Every prediction. One place','A clear record of your company’s requests and outcomes.'],performance:['Performance','Let the results speak','Evaluate what was predicted before the final whistle.'],providers:['Data sources','Know your sources','Manage your providers and keep an eye on their performance.']};
         $('page-label').textContent = headings[tab][0]; $('page-title').innerHTML = `${headings[tab][1]}<span>.</span>`; $('page-description').textContent = headings[tab][2];
@@ -102,6 +111,7 @@
     }
     async function loadFixtures() {
         const requestId = ++fixtureRequest;
+        updateMatchViews();
         $('fixtures-prev').disabled = $('fixtures-next').disabled = true;
         $('fixture-page-label').textContent = 'Loading fixtures…'; $('fixture-count').textContent = '…';
         return withLoading(['fixtures'], 'Finding fixtures…', async () => {
@@ -255,6 +265,7 @@
         try {
             if (target.hasAttribute('data-close')) target.closest('dialog').close();
             else if (target.dataset.tab) setTab(target.dataset.tab);
+            else if (target.hasAttribute('data-match-view')) { $('status-filter').value = target.dataset.matchView; $('filters').requestSubmit(); }
             else if (target.dataset.retry) {
                 const retries = {fixtures:loadFixtures,predictions:loadPrivate,ledger:loadPrivate,performance:loadPerformance,providers:loadProviders,'provider-usage':loadProviders,'detail-body':() => openFixture(state.detailTarget.id,state.detailTarget.predictionId)};
                 await retries[target.dataset.retry]?.();
@@ -284,6 +295,8 @@
     });
     $('show-register').onclick = () => { $('auth-dialog').close(); $('register-dialog').showModal(); };
     $('company').onchange = async () => { state.company=Number($('company').value); state.epoch++; state.historyPage=1; state.predictions=[]; state.detailVersion++; $('detail-dialog').close(); renderIdentity(); $('prediction-count').textContent = $('credit-count').textContent = '…'; $('predictions').innerHTML = $('ledger').innerHTML = empty('Loading company data…',''); $('performance').innerHTML = ''; renderFixtures(); try { await loadPrivate(); if(state.tab==='performance') await loadPerformance(); } catch(error) { notice(error.message,true); } };
+    $('reset-filters').onclick = () => { $('search').value = ''; $('league-filter').value = String(state.leagues.find(l => l.source === 'football-data')?.id || ''); $('status-filter').value = 'upcoming'; $('filters').requestSubmit(); };
+    $('status-filter').addEventListener('change',updateMatchViews);
     $('filters').onsubmit = async event => { event.preventDefault(); state.page=1; const restore=buttonLoading($('filters').querySelector('button'),'Finding matches…'); try { await loadFixtures(); } catch(error) { notice(error.message,true); } finally { restore(); } };
     for (const [id,delta] of [['fixtures-prev',-1],['fixtures-next',1]]) $(id).onclick = () => { state.page+=delta; loadFixtures().catch(error => notice(error.message,true)); };
     for (const [id,delta] of [['predictions-prev',-1],['predictions-next',1]]) $(id).onclick = () => { state.historyPage+=delta; loadPrivate().catch(error => notice(error.message,true)); };
@@ -308,6 +321,7 @@
         } catch(error) { if(error.status===401) { notice('Your session expired. Sign in again.',true); state.company=null; } }
         finally { state.polling=false; }
     }
+    document.querySelector('[data-tab=matches]').setAttribute('aria-current','page');
     $('fixtures').innerHTML = skeleton('Loading your match center…',true);
     $('fixtures').setAttribute('aria-busy','true');
     (async () => { try { await Promise.all([loadIdentity(),loadLeagues()]); await Promise.all([loadFixtures(),loadPrivate()]); } catch(error) { notice(error.message,true); if (!$('fixtures').querySelector('.load-error')) { $('fixtures').innerHTML=empty('Unable to load the workspace','Reload the page to try again.'); $('fixtures').setAttribute('aria-busy','false'); } } })();

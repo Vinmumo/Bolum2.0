@@ -35,3 +35,13 @@ Keep source IDs separate from Bolum IDs. The same club or fixture has different 
 Snapshot forecast inputs and observation timestamps before kickoff, then evaluate stored forecasts prospectively. Keep sample results distinct from models built with real data. Richer data and a more expensive subscription do not establish predictive accuracy on their own.
 
 For crests, the importer accepts HTTPS image URLs only from the configured source's public crest CDN. The browser uses image elements, reserves space for the artwork, and keeps initials when a crest cannot load. Optional missing crest metadata does not prevent importing fixtures or erase previously imported valid artwork.
+
+## TheSportsDB club profiles
+
+`GET /api/v1/teams/{team}/profile` enriches an imported club with stadium, location, founding year and a short description. In the dashboard, open a match and choose either club in **Club guide**. Lookups happen only on request and are cached for one hour, including unmatched searches. Source attribution and retrieval time are returned. The fixture catalog, crests and prediction inputs remain owned by their existing sources.
+
+The server calls the fixed HTTPS v1 `searchteams.php` endpoint with the club name and validates an unambiguous soccer/name/country match. Bolum IDs are not reused as TheSportsDB IDs. Unknown/ambiguous clubs return 404; malformed data or upstream/configuration problems return a sanitized 503 and can be retried. A cache lock limits duplicate concurrent lookups. The existing HTTP client applies timeouts, bounded retries and sanitized telemetry; the public route shares the 10 football reads/minute/IP limiter with standings.
+
+`SPORTSDB_API_KEY=123` is the documented public free key; no personal signup is needed for the default lookup. Set a personal key if needed, or blank to disable, then clear configuration and restart long-running processes. Keys remain on the server. The upstream free tier currently permits 30 requests/minute; per-IP limits do not guarantee aggregate traffic stays below that limit, so high-traffic deployments need a shared upstream budget or an appropriate plan. See the [official documentation](https://www.thesportsdb.com/documentation).
+
+Club metadata is third-party content, can be missing or inaccurate, and is not forecasting evidence. It is displayed as escaped text with a source link. This integration does not import historical forecasts or silently replace football-data.org fixtures.

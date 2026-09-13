@@ -10,9 +10,9 @@ use Illuminate\Support\Facades\Http;
 
 class ProviderHttpClient
 {
-    public function get(string $source, string $operation, string $url, array $headers, array $query, Closure $normalize, int $ttl = 300): array
+    public function get(string $source, string $operation, string $url, array $headers, array $query, Closure $normalize, int $ttl = 300, ?string $cacheContext = null): array
     {
-        $key = 'football:http:'.hash('sha256', json_encode([$url, $query, $headers]));
+        $key = 'football:http:'.hash('sha256', json_encode([$url, $query, $headers, $cacheContext]));
         if (($cached = Cache::get($key)) !== null) {
             $this->record($source, $operation, 'cached', null, 0, true, 1);
 

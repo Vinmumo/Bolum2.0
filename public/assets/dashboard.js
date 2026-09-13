@@ -27,7 +27,8 @@
     const state = {user:null,companies:[],company:null,epoch:0,fixtures:[],leagues:[],predictions:[],providers:[],page:1,historyPage:1,tab:'matches',selected:null,prediction:null,detailVersion:0,keys:new Map(),polling:false};
     let csrf = document.querySelector('meta[name="csrf-token"]').content;
     let toastTimer;
-    let fixtureRequest = 0, privateRequest = 0, performanceRequest = 0, providerRequest = 0, standingsRequest = 0;
+    let fixtureRequest = 0, privateRequest = 0, performanceRequest = 0, providerRequest = 0, standingsRequest = 0, profileRequest = 0, trackRequest = 0;
+    let searchTimer;
     let loadingVersion = 0, pendingRequests = 0, networkTimer;
     const buttonStates = new WeakMap();
     const spinner = '<span class="loading-spinner" aria-hidden="true"></span>';
@@ -83,11 +84,104 @@
         const body = response.status === 204 ? {} : await response.json().catch(() => ({}));
         if (!response.ok) {
             const message = response.status === 419 ? 'Your session expired. Reload this page and sign in again.' : Object.values(body.errors || {}).flat()[0] || body.message || 'The request could not be completed.';
-            const error = new Error(message); error.status = response.status; throw error;
+            const error = new Error(message); error.status = response.status; error.fields = body.errors || {}; throw error;
         }
         if (body.csrf_token) csrf = body.csrf_token;
         return body;
         } finally { clearTimeout(timeout); if (!background) networkBusy(-1); }
+    }
+    const avatarOptions = {football:['⚽','Football'],captain:['★','Captain'],keeper:['◉','Goalkeeper'],trophy:['♜','Champion'],stadium:['▥','Stadium'],lightning:['ϟ','Lightning']};
+    function avatar(user, large = false) {
+        const key = Object.hasOwn(avatarOptions,user?.avatar) ? user.avatar : 'football';
+        return `<span class="profile-avatar avatar-${key}${large ? ' large' : ''}" aria-hidden="true">${avatarOptions[key][0]}</span>`;
+    }
+    function clearFieldError(field) {
+        if (!field.name) return;
+        const id = `${field.form.id}-${field.name}-error`;
+        $(id)?.remove(); field.removeAttribute('aria-invalid');
+        const remaining = (field.getAttribute('aria-describedby') || '').split(' ').filter(x=>x && x!==id);
+        if (remaining.length) field.setAttribute('aria-describedby',remaining.join(' ')); else field.removeAttribute('aria-describedby');
+    }
+    function fieldError(field,message) {
+        clearFieldError(field);
+        const error = document.createElement('small'); error.id = `${field.form.id}-${field.name}-error`; error.className='field-error'; error.textContent=message;
+        field.insertAdjacentElement('afterend',error); field.setAttribute('aria-invalid','true');
+        field.setAttribute('aria-describedby',[field.getAttribute('aria-describedby'),error.id].filter(Boolean).join(' '));
+    }
+    function fieldMessage(field) {
+        if (field.disabled || field.type === 'hidden' || !field.willValidate) return '';
+        if (!['password','checkbox','radio'].includes(field.type)) field.value = field.value.trim();
+        const validity=field.validity;
+        if (validity.valueMissing) return 'This field is required.';
+        if (validity.typeMismatch && field.type==='email') return 'Enter a valid email address.';
+        if (field.value && field.minLength>0 && field.value.length<field.minLength) return `Use at least ${field.minLength} characters.`;
+        if (field.maxLength>0 && field.value.length>field.maxLength) return `Use no more than ${field.maxLength} characters.`;
+        if (field.name==='password_confirmation' && field.value!==field.form.elements.password.value) return 'Passwords do not match.';
+        if (field.name==='away_team_id' && field.value===field.form.elements.home_team_id.value) return 'Choose a different away team.';
+        if (validity.rangeUnderflow) return `Enter ${field.min} or more.`;
+        if (validity.rangeOverflow) return `Enter ${field.max} or less.`;
+        if (validity.stepMismatch) return field.step==='0.001' ? 'Use up to three decimal places.' : 'Enter a whole number.';
+        if (validity.badInput || !validity.valid) return 'Check this value and try again.';
+        return '';
+    }
+    function validateForm(form) {
+        let first;
+        for (const field of form.elements) {
+            if (!field.name) continue;
+            clearFieldError(field); const message=fieldMessage(field);
+            if (message) {fieldError(field,message); first ||= field;}
+        }
+        if (first) {form.querySelector('.form-error').textContent='Please check the highlighted fields.'; first.focus(); return false;}
+        return true;
+    }
+    function setupValidation(form) {
+        form.noValidate=true;
+        form.addEventListener('input',event=>{if(event.target.name) clearFieldError(event.target);});
+        form.addEventListener('focusout',event=>{
+            const field=event.target; if(!field.name || !field.willValidate) return;
+            const message=fieldMessage(field); if(message) fieldError(field,message); else clearFieldError(field);
+        });
+        form.addEventListener('reset',()=>{for(const field of form.elements) clearFieldError(field); form.querySelector('.form-error').textContent='';});
+    }
+    function showFormError(form,error) {
+        form.querySelector('.form-error').textContent=error.message;
+        let first;
+        for(const [name,messages] of Object.entries(error.fields || {})) {
+            const field=form.elements.namedItem(name);
+            if (field instanceof HTMLElement) {fieldError(field,messages[0]); first ||= field;}
+        }
+        first?.focus();
+    }
+    async function loadProfile() {
+        const epoch=state.epoch, requestId=++profileRequest;
+        if(!state.user) {$('profile').innerHTML=empty('Your profile','Sign in to manage your account and preferences.',true); return;}
+        await withLoading(['profile'],'Loading your profile…',async()=>{
+            const response=await api('/api/v1/profile'); if(epoch!==state.epoch || requestId!==profileRequest) return;
+            state.user={...state.user,...response.data}; renderProfile();
+        });
+    }
+    function renderProfile() {
+        const user=state.user; if(!user) return;
+        const joined=new Date(user.created_at).toLocaleDateString([],{year:'numeric',month:'short',day:'numeric'});
+        $('profile').innerHTML=`<div class="profile-layout"><aside class="profile-summary">${avatar(user,true)}<h2>${esc(user.name)}</h2><dl><div><dt>Joined</dt><dd>${esc(joined)}</dd></div><div><dt>Workspaces</dt><dd>${state.companies.length}</dd></div><div><dt>Access</dt><dd>${user.is_admin?'Administrator':'Member'}</dd></div></dl><button class="profile-link selected" type="button">♙ &nbsp; Profile</button><button class="profile-link" data-tab="predictions">◈ &nbsp; Prediction history</button><button class="profile-link" data-tab="performance">↗ &nbsp; Performance</button><button class="profile-link danger" data-logout>↪ &nbsp; Sign out</button></aside><div class="profile-content"><h2>Profile</h2><div class="profile-identity">${avatar(user,true)}<div><h3>${esc(user.name)}</h3><p>Joined ${esc(joined)} · ${esc(user.email)}</p></div></div><form id="profile-form" class="profile-form"><div class="avatar-picker"><h3>Pick your avatar</h3><p>Choose a football identity for your account.</p><input type="hidden" name="avatar" value="${esc(user.avatar || 'football')}"><div class="avatar-options" role="group" aria-label="Choose an avatar">${Object.entries(avatarOptions).map(([key,option])=>`<button type="button" data-avatar="${key}" aria-label="${option[1]}" aria-pressed="${key===(user.avatar || 'football')}">${avatar({avatar:key})}</button>`).join('')}</div><small class="field-hint">Saved when you select Save changes.</small></div><h3 class="profile-section-title">Account</h3><label class="profile-field"><span>Email address</span><div><input type="email" value="${esc(user.email)}" readonly aria-describedby="email-help"><small id="email-help" class="field-hint">Email cannot be changed here.</small></div></label><label class="profile-field"><span>Display name</span><input name="name" value="${esc(user.name)}" required maxlength="100" autocomplete="name"></label><div class="form-error" role="alert"></div><button class="button primary" type="submit">Save changes</button></form><form id="password-form" class="profile-form"><h3 class="profile-section-title">Security</h3><p>Updating your password signs you out. Use your new password to sign in again.</p><label class="profile-field"><span>Current password</span><input name="current_password" type="password" required autocomplete="current-password"></label><label class="profile-field"><span>New password</span><div><input name="password" type="password" required minlength="10" autocomplete="new-password"><small class="field-hint">Use at least 10 characters.</small></div></label><label class="profile-field"><span>Confirm password</span><input name="password_confirmation" type="password" required autocomplete="new-password"></label><div class="form-error" role="alert"></div><button class="button secondary" type="submit">Change password</button></form></div></div>`;
+        bindForm('profile-form',async form=>{
+            const epoch=state.epoch, response=await api('/api/v1/profile',{method:'PATCH',data:Object.fromEntries(new FormData(form))});
+            if(epoch!==state.epoch) return; state.user={...state.user,...response.data}; renderIdentity(); renderProfile(); notice('Your profile has been saved.');
+        });
+        bindForm('password-form',async form=>{
+            await api('/api/v1/profile/password',{method:'PUT',data:Object.fromEntries(new FormData(form))});
+            clearIdentity(); await loadPrivate(); setTab('profile'); notice('Password changed. Sign in with your new password.'); $('auth-dialog').showModal();
+        });
+    }
+    function clearIdentity() {
+        state.user=null; state.companies=[]; state.company=null; state.epoch++; state.keys.clear(); state.detailVersion++;
+        $('detail-dialog').close(); renderIdentity();
+        for(const id of ['providers','provider-usage','admin-overview','track-record','performance','profile']) $(id).innerHTML='';
+    }
+    async function signOut(button) {
+        const restore=buttonLoading(button,'Signing out…');
+        try {await api('/session/logout',{method:'POST',data:{}}); clearIdentity(); setTab('matches'); await loadPrivate(); notice('You are signed out.');}
+        catch(error) {notice(error.message,true);} finally {restore();}
     }
     function companyPath(path) { return `/api/v1/companies/${state.company}${path}`; }
     function empty(title, description, signin = false) { return `<div class="empty"><strong>${esc(title)}</strong>${esc(description)}${signin ? '<br><button class="button primary" data-signin>Sign in →</button>' : ''}</div>`; }
@@ -95,20 +189,27 @@
         if (!probs) return '';
         return `<div class="probability-bar" role="img" aria-label="Home ${pct(probs.home_win)}, draw ${pct(probs.draw)}, away ${pct(probs.away_win)}">${['home_win','draw','away_win'].map((key,i) => `<span class="${['home','draw','away'][i]}" style="width:${Math.max(0,Math.min(100,Number(probs[key])*100))}%"></span>`).join('')}</div><div class="probability-labels"><span>Home ${pct(probs.home_win)}</span><span>Draw ${pct(probs.draw)}</span><span>Away ${pct(probs.away_win)}</span></div>`;
     }
-    function setTab(tab) {
+    function setTab(tab, navigate = true) {
+        if (!['matches','predictions','performance','standings','providers','profile'].includes(tab)) tab='matches';
         if (tab === 'providers' && !state.user?.is_admin) return;
         state.tab = tab;
+        document.body.classList.toggle('operations-mode',tab==='providers');
+        if(navigate) history.pushState(null,'',tab==='profile'?'/profile':tab==='matches'?'/':`/#${tab}`);
+        document.querySelector('.metrics[aria-label]').hidden = ['profile','providers'].includes(tab);
+        document.querySelector('.page-heading').hidden = tab==='profile';
         document.querySelectorAll('[data-tab]').forEach(el => { const active = el.dataset.tab === tab; el.classList.toggle('active',active); el.setAttribute('aria-current',active ? 'page' : 'false'); el.setAttribute('aria-controls',`${el.dataset.tab}-panel`); });
         document.querySelectorAll('.tab-panel').forEach(el => el.hidden = el.id !== `${tab}-panel`);
-        const headings = {standings:['League table','The season in perspective','Follow the standings, then explore each match in context.'],matches:['Match center','A better view of the game','Explore the fixtures. Find the probabilities. Follow the results.'],predictions:['Predictions','Every prediction. One place','A clear record of your company’s requests and outcomes.'],performance:['Performance','Let the results speak','Evaluate what was predicted before the final whistle.'],providers:['Data sources','Know your sources','Manage your providers and keep an eye on their performance.']};
+        const headings = {profile:['Profile','Your space at Bolum','Manage your account.'],standings:['League table','The season in perspective','Follow the standings, then explore each match in context.'],matches:['Match center','A better view of the game','Explore the fixtures. Find the probabilities. Follow the results.'],predictions:['Predictions','Every prediction. One place','A clear record of your workspace’s requests and outcomes.'],performance:['Performance','Let the results speak','Evaluate what was predicted before the final whistle.'],providers:['Operations','Keep Bolum running','Monitor processing, maintain fixtures and manage the data sources.']};
         $('page-label').textContent = headings[tab][0]; $('page-title').innerHTML = `${headings[tab][1]}<span>.</span>`; $('page-description').textContent = headings[tab][2];
+        if (tab === 'profile') loadProfile().catch(error => notice(error.message,true));
         if (tab === 'standings') loadStandings().catch(error => notice(error.message,true));
         if (tab === 'performance') loadPerformance().catch(error => notice(error.message,true));
-        if (tab === 'providers') loadProviders().catch(error => notice(error.message,true));
+        if (tab === 'providers') {loadProviders().catch(error => notice(error.message,true)); if(state.adminView==='record') loadTrackRecord().catch(error=>notice(error.message,true));}
     }
     function renderIdentity() {
-        $('account').innerHTML = state.user ? `${esc(state.user.name)} <span class="avatar">↗</span>` : 'Sign in <span class="avatar">→</span>';
-        $('account').title = state.user ? 'Sign out' : 'Sign in';
+        $('account').innerHTML = state.user ? `${esc(state.user.name)} ${avatar(state.user)}` : 'Sign in <span class="avatar">→</span>';
+        $('account').title = state.user ? 'Open your profile' : 'Sign in';
+        $('logout').hidden = !state.user;
         $('company').innerHTML = state.companies.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
         $('company').value = state.company || ''; $('company').hidden = !state.user;
         document.querySelectorAll('.admin-only').forEach(el => el.hidden = !state.user?.is_admin);
@@ -133,11 +234,12 @@
         $('fixtures-prev').disabled = $('fixtures-next').disabled = true;
         $('fixture-page-label').textContent = 'Loading fixtures…'; $('fixture-count').textContent = '…';
         return withLoading(['fixtures'], 'Finding fixtures…', async () => {
-        const params = new URLSearchParams(new FormData($('filters'))); [...params.keys()].forEach(key => { if (!params.get(key)) params.delete(key); });
+        const params = new URLSearchParams(new FormData($('filters')));
+        if($('league-filter').value) params.set('league_id',$('league-filter').value); [...params.keys()].forEach(key => { if (!params.get(key)) params.delete(key); });
         if (params.get('status') === 'upcoming') { params.delete('status'); params.set('upcoming','1'); }
         params.set('page',state.page); params.set('per_page',9);
-        const page = state.page, response = await api(`/api/v1/fixtures?${params}`);
-        if (page !== state.page || requestId !== fixtureRequest) return;
+        const page = state.page, response = await api(`/api/v1/fixtures?${params}`).catch(error=>{if(requestId===fixtureRequest) throw error; return null;});
+        if (!response || page !== state.page || requestId !== fixtureRequest) return;
         state.fixtures = response.data; renderFixtures(true); $('fixture-count').textContent = response.meta.total;
         const league = state.leagues.find(l => String(l.id) === $('league-filter').value);
         $('fixture-context').textContent = league?.source === 'football-data' ? 'Real fixtures from football-data.org. Kickoff times are shown in your local time.' : 'Browse imported and local fixtures. Local sample schedules are for demonstration.';
@@ -146,15 +248,54 @@
         }).finally(() => { if (requestId === fixtureRequest && $('fixtures').querySelector('.load-error')) { $('fixture-count').textContent = '—'; $('fixture-page-label').textContent = 'Fixtures could not be loaded.'; } });
     }
     async function loadLeagues() {
-        const previous = $('league-filter').value;
-        const response = await api('/api/v1/leagues?per_page=100'); state.leagues = response.data;
-        const options = state.leagues.map(l => `<option value="${l.id}">${esc(l.name)}</option>`).join('');
-        $('league-filter').innerHTML = '<option value="">All leagues</option>' + options; $('fixture-league').innerHTML = options;
-        const preferred = state.leagues.find(l => l.source === 'football-data');
-        $('league-filter').value = state.catalogLoaded ? previous : String(preferred?.id || '');
-        $('standings-league').innerHTML = state.leagues.filter(l => l.source === 'football-data').map(l => `<option value="${l.id}">${esc(l.name)}</option>`).join('') || '<option value="">No imported leagues</option>';
-        state.catalogLoaded = true;
-        if (state.tab === 'standings') await loadStandings();
+        const previous=$('league-filter').value;
+        const [response,optionsResponse]=await Promise.all([api('/api/v1/leagues?per_page=100'),api('/api/v1/fixtures/filter-options')]);
+        state.leagues=response.data; state.rounds=optionsResponse.data;
+        const imported=state.leagues.filter(l=>l.source==='football-data'), available=imported.length?imported:state.leagues;
+        const options=available.map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('');
+        $('fixture-league').innerHTML=state.leagues.map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('');
+        $('league-filter').innerHTML=options;
+        $('league-filter').disabled=available.length<=1;
+        if(available.some(l=>String(l.id)===previous)) $('league-filter').value=previous;
+        $('league-filter-hint').textContent=imported.length===1?`${imported[0].name} is the only imported league. League selection unlocks when another league is added.`:available.length===1?'One league is available. League selection unlocks when another is added.':'';
+        $('record-league').innerHTML=options; $('record-league').disabled=available.length<=1;
+        $('standings-league').innerHTML=imported.map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('') || '<option value="">No imported leagues</option>';
+        matchRounds(); recordRounds(); state.catalogLoaded=true;
+        if(state.tab==='standings') await loadStandings();
+    }
+    function populateRounds(league, season, matchday, past = false) {
+        const rows=(state.rounds || []).filter(r=>String(r.league_id)===league.value && (!past || r.finished>0));
+        const seasons=[...new Set(rows.map(r=>String(r.season)))].sort().reverse();
+        const previousSeason=season.value, previousRound=matchday.value;
+        season.innerHTML=seasons.map(value=>`<option value="${esc(value)}">${esc(value)}/${String(Number(value)+1).slice(-2)}</option>`).join('') || '<option value="">No season data</option>';
+        if(seasons.includes(previousSeason)) season.value=previousSeason;
+        season.disabled=!seasons.length;
+        const rounds=rows.filter(r=>String(r.season)===season.value).sort((a,b)=>a.matchday-b.matchday);
+        matchday.innerHTML=(past?'':'<option value="">All gameweeks</option>')+rounds.map(r=>`<option value="${r.matchday}">Gameweek ${r.matchday}${past?` · ${r.finished}/${r.fixtures} final`:''}</option>`).join('');
+        if(!rounds.length && past) matchday.innerHTML='<option value="">No results yet</option>';
+        matchday.disabled=!rounds.length;
+        if(rounds.some(r=>String(r.matchday)===previousRound)) matchday.value=previousRound;
+        else matchday.value=past?String(rounds.at(-1)?.matchday || ''):'';
+    }
+    function matchRounds() {populateRounds($('league-filter'),$('season-filter'),$('matchday-filter'));}
+    function recordRounds() {populateRounds($('record-league'),$('record-season'),$('record-matchday'),true);}
+    function setAdminView(view) {
+        state.adminView=view;
+        $('operations-overview').hidden=view!=='overview'; $('operations-record').hidden=view!=='record';
+        document.querySelectorAll('[data-admin-view]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.adminView===view)));
+        if(view==='record') loadTrackRecord().catch(error=>notice(error.message,true));
+    }
+    async function loadTrackRecord() {
+        const epoch=state.epoch, requestId=++trackRequest;
+        if(!state.company || !state.user?.is_admin) {$('track-record').innerHTML='';return;}
+        if(!$('record-season').value || !$('record-matchday').value) {$('track-record').innerHTML=empty('No completed gameweeks yet','Import results to browse a gameweek’s track record.');return;}
+        const params=new URLSearchParams(new FormData($('record-filters')));
+        params.set('league_id',$('record-league').value);
+        await withLoading(['track-record'],'Comparing saved forecasts with results…',async()=>{
+            const response=await api(companyPath(`/track-record?${params}`)); if(epoch!==state.epoch || requestId!==trackRequest) return;
+            const r=response.data, pick={home_win:'Home win',draw:'Draw',away_win:'Away win'};
+            $('track-record').innerHTML=`<div class="track-summary"><article><small>Finished fixtures</small><strong>${r.finished} / ${r.fixtures}</strong></article><article><small>Evaluated forecasts</small><strong>${r.evaluated}</strong></article><article><small>Correct outcomes</small><strong>${r.correct} / ${r.evaluated}</strong></article><article><small>Outcome accuracy</small><strong>${r.accuracy===null?'—':pct(r.accuracy)}</strong></article></div><p class="panel-note">${esc(r.method)} ${r.missing_forecasts} fixtures have no eligible saved forecast. Missing forecasts are excluded from accuracy.</p><div class="table-wrap" role="region" aria-label="Gameweek prediction track record" tabindex="0"><table class="track-table"><thead><tr><th scope="col">Fixture</th><th scope="col">Final score</th><th scope="col">Bolum forecast</th><th scope="col">Outcome</th></tr></thead><tbody>${r.rows.map(row=>`<tr><td><strong>${esc(row.home_team)} vs ${esc(row.away_team)}</strong><small>${esc(when(row.kickoff_at))}</small></td><td>${row.score?`${row.score.home} – ${row.score.away}`:esc(row.status)}</td><td>${row.forecast?`<strong>${pick[row.forecast.pick]}</strong>${row.forecast.score?` · ${row.forecast.score.home}–${row.forecast.score.away}`:''}<small>${pct(row.forecast.probabilities[row.forecast.pick])} probability · Saved ${esc(when(row.forecast.created_at))}</small>`:'No saved pre-match forecast'}</td><td><span class="track-status ${row.correct===null?'missing':row.correct?'correct':'incorrect'}">${row.correct===null?(row.forecast?'Awaiting final result':'Not evaluated'):row.correct?'Correct':'Incorrect'}</span></td></tr>`).join('') || '<tr><td colspan="4">No fixtures in this gameweek.</td></tr>'}</tbody></table></div><p class="panel-note">This is a record of forecasts actually saved before kickoff. A prediction calculated today for a past match would be a retrospective simulation, and is not included here.</p>`;
+        });
     }
     async function loadStandings() {
         const requestId = ++standingsRequest, league = $('standings-league').value;
@@ -181,12 +322,12 @@
         const epoch = state.epoch;
         if (!state.company) {
             state.predictions = []; $('prediction-count').textContent = '—'; $('credit-count').textContent = '—';
-            $('predictions').innerHTML = empty('Your predictions belong here','Sign in to view your company’s prediction history.',true);
+            $('predictions').innerHTML = empty('Your predictions belong here','Sign in to view your workspace’s prediction history.',true);
             $('ledger').innerHTML = empty('A clear credit trail','Sign in to see grants, debits and refunds.',true);
             $('prediction-page-label').textContent = ''; $('predictions-prev').disabled = $('predictions-next').disabled = true; renderFixtures(); return;
         }
         if (!quiet) { $('prediction-count').textContent = $('credit-count').textContent = '…'; $('predictions-prev').disabled = $('predictions-next').disabled = true; $('prediction-page-label').textContent = 'Loading history…'; }
-        return withLoading(['predictions','ledger'], 'Loading your company activity…', async () => {
+        return withLoading(['predictions','ledger'], 'Loading your workspace activity…', async () => {
         const [history,credits] = await Promise.all([api(companyPath(`/predictions?per_page=15&page=${state.historyPage}`),{background:quiet}),api(companyPath('/credits?per_page=15'),{background:quiet})]);
         if (epoch !== state.epoch || requestId !== privateRequest) return;
         state.predictions = history.data; $('prediction-count').textContent = history.meta.total; $('credit-count').textContent = credits.balance;
@@ -197,7 +338,7 @@
         }, {quiet}).finally(() => { if (epoch === state.epoch && requestId === privateRequest && $('predictions').querySelector('.load-error')) { $('prediction-count').textContent = $('credit-count').textContent = '—'; $('prediction-page-label').textContent = ''; } });
     }
     async function openFixture(id, predictionId = null) {
-        const version = ++state.detailVersion; state.selected = null; state.prediction = null; state.detailTarget = {id,predictionId}; $('detail-title').textContent = 'Loading fixture…';
+        const version = ++state.detailVersion; state.selected = null; state.prediction = null; state.detailTarget = {id,predictionId}; state.club = null; $('detail-title').textContent = 'Loading fixture…';
         if (!$('detail-dialog').open) $('detail-dialog').showModal();
         return withLoading(['detail-body'], 'Loading match analysis…', async () => {
         const fixture = await api(`/api/v1/fixtures/${id}`); if (version !== state.detailVersion) return;
@@ -215,8 +356,9 @@
         $('detail-title').textContent = `${f.home_team.name} vs ${f.away_team.name}`;
         const canPredict = f.status === 'scheduled' && new Date(f.kickoff_at) > new Date();
         let html = `<div class="detail-clubs"><div>${teamBadge(f.home_team)}<strong>${esc(f.home_team.name)}</strong></div><span class="versus">VS</span><div>${teamBadge(f.away_team,true)}<strong>${esc(f.away_team.name)}</strong></div></div><div class="detail-meta">${esc(f.league.name)} · ${esc(when(f.kickoff_at))} ${badge(f.status)}</div>`;
+        html += '<div id="prediction-feedback" aria-live="polite"></div>';
         if (p) html += `<p>Prediction #${p.id} · ${esc(when(p.created_at))} ${badge(p.status)}</p>`;
-        if (p?.status === 'pending') html += `<div class="notice queued-state" role="status">${spinner}<div><strong>Your prediction is queued.</strong><br>This page updates automatically when it is ready.</div></div>`;
+        if (p?.status === 'pending') html += `<div class="notice queued-state" role="status">${spinner}<div><strong>Your prediction is queued.</strong><br>Waiting for a worker to calculate your result. This page updates automatically.</div></div><div class="prediction-progress" aria-busy="true"><div class="prediction-steps"><span>✓ Request accepted</span><span class="current">◌ Awaiting result</span><span>Analysis ready</span></div><div class="skeleton-line"></div><div class="skeleton-line short"></div><p id="prediction-sync">Checking for your result every few seconds…</p></div>`;
         if (p?.status === 'failed') html += `<div class="notice error">${esc(p.error)}</div>`;
         if (p?.result) {
             const r = p.result;
@@ -228,23 +370,54 @@
         if (canPredict && p?.status !== 'pending') html += `<button id="generate" class="button primary full">${state.user ? (p ? 'Generate a new prediction · 1 credit' : 'Generate prediction · 1 credit') : 'Sign in to generate a prediction →'}</button><p>Repeated delivery of the same request never spends another credit.</p>`;
         if (!p && !canPredict) html += '<p>New predictions are available only before a scheduled fixture starts.</p>';
         html += recentForm(f);
+        if (f.source === 'football-data' && f.home_team.id && f.away_team.id) html += `<section class="detail-block club-guide"><h3>Club guide</h3><p class="panel-note">Explore the clubs and their stadiums.</p><div class="club-guide-buttons">${[f.home_team,f.away_team].map(t=>`<button class="button secondary" data-club="${t.id}">${esc(t.name)} info</button>`).join('')}</div><div id="club-profile" aria-live="polite">${clubMarkup()}</div></section>`;
         if (state.user?.is_admin && new Date(f.kickoff_at) <= new Date() && !['postponed','cancelled'].includes(f.status)) html += `<div class="detail-block"><h3>Record final score</h3><form id="result-form" class="result-form"><label>Home<input name="home_goals" type="number" min="0" max="100" value="${f.score.home ?? 0}" required></label><label>Away<input name="away_goals" type="number" min="0" max="100" value="${f.score.away ?? 0}" required></label><button class="button primary">Save result</button><div class="form-error" role="alert"></div></form></div>`;
         $('detail-body').innerHTML = html;
+        if($('result-form')) setupValidation($('result-form'));
+    }
+    function clubMarkup() {
+        const club = state.club;
+        if (!club) return '<p class="panel-note">Choose a club to load information from TheSportsDB.</p>';
+        if (club.status === 'loading') return `<div class="notice" role="status" aria-busy="true">${spinner} Loading club information…</div>`;
+        if (club.status === 'error') return `<div class="notice error" role="alert">${esc(club.error)} <button class="button secondary" data-club="${club.teamId}">Retry club information</button></div>`;
+        const p = club.data;
+        const sourceUrl = /^https:\/\/www\.thesportsdb\.com\/team\/[0-9]+$/.test(p.source_url || '') ? p.source_url : 'https://www.thesportsdb.com';
+        return `<article class="club-profile-card"><h4>${esc(p.name)}</h4><dl><div><dt>Stadium</dt><dd>${esc(p.stadium || 'Not provided')}</dd></div><div><dt>Location</dt><dd>${esc(p.location || 'Not provided')}</dd></div><div><dt>Founded</dt><dd>${esc(p.formed_year || 'Not provided')}</dd></div></dl>${p.description ? `<p>${esc(p.description)}</p>` : ''}<small>Club information from <a href="${esc(sourceUrl)}" target="_blank" rel="noopener noreferrer">TheSportsDB ↗</a> · Retrieved ${esc(when(p.fetched_at))}. Not used in prediction calculations.</small></article>`;
+    }
+    async function loadClubProfile(button) {
+        const teamId = Number(button.dataset.club), version = state.detailVersion;
+        if (!Number.isInteger(teamId) || !state.selected || ![state.selected.home_team.id,state.selected.away_team.id].includes(teamId)) return;
+        const request = {teamId,status:'loading'}; state.club = request;
+        $('club-profile').innerHTML = clubMarkup();
+        const restore = buttonLoading(button,'Loading club…');
+        try {
+            const response = await api(`/api/v1/teams/${teamId}/profile`);
+            if (version !== state.detailVersion || state.club !== request) return;
+            state.club = {teamId,status:'ready',data:response.data};
+        } catch (error) {
+            if (version !== state.detailVersion || state.club !== request) return;
+            state.club = {teamId,status:'error',error:error.message};
+        } finally {
+            restore();
+            if (version === state.detailVersion && state.club?.teamId === teamId && $('club-profile')) $('club-profile').innerHTML = clubMarkup();
+        }
     }
     async function generate(button) {
         if (!state.user) { $('detail-dialog').close(); $('auth-dialog').showModal(); return; }
         const epoch = state.epoch, version = state.detailVersion, f = state.selected, keyId = `${state.company}:${f.id}`;
         const key = state.keys.get(keyId) || crypto.randomUUID(); state.keys.set(keyId,key);
+        if(button.disabled) return;
         buttonLoading(button, 'Requesting prediction…');
+        $('prediction-feedback').innerHTML=`<div class="prediction-requesting" role="status">${spinner}<div><strong>Requesting your prediction</strong><p>Checking match data and available credits…</p></div></div>`;
         try {
             const response = await api(companyPath(`/fixtures/${f.id}/predictions`),{method:'POST',data:{},headers:{'Idempotency-Key':key}});
             state.keys.delete(keyId); if (epoch !== state.epoch) return;
             if (version === state.detailVersion && state.selected?.id === f.id) { state.prediction = response.data; renderDetail(); } await loadPrivate(); notice('Prediction requested. Your result will appear here.');
-        } catch(error) { button.disabled = false; button.removeAttribute('aria-busy'); button.textContent = 'Retry prediction request · 1 credit'; notice(error.message,true); }
+        } catch(error) { if(epoch!==state.epoch || version!==state.detailVersion) return; button.disabled = false; button.removeAttribute('aria-busy'); button.textContent = 'Retry prediction request · 1 credit'; $('prediction-feedback').innerHTML=`<div class="notice error" role="alert">${esc(error.message)}</div>`; }
     }
     async function loadPerformance() {
         const requestId = ++performanceRequest;
-        if (!state.company) { $('performance').innerHTML = empty('Measure your predictions','Sign in to view your company’s performance.',true); return; }
+        if (!state.company) { $('performance').innerHTML = empty('Measure your predictions','Sign in to view your workspace’s performance.',true); return; }
         const epoch = state.epoch, quality = $('quality').value;
         return withLoading(['performance'], 'Loading prediction performance…', async () => {
         const response = await api(companyPath(`/performance?quality=${quality}`)); if (epoch !== state.epoch || quality !== $('quality').value || requestId !== performanceRequest) return;
@@ -257,10 +430,12 @@
         if (!state.user?.is_admin) return;
         if (quiet && $('providers').getAttribute('aria-busy') === 'true') return;
         const epoch = state.epoch, requestId = ++providerRequest;
-        return withLoading(['providers','provider-usage'], 'Loading data sources…', async () => {
-        const [providers,usage] = await Promise.all([api('/api/v1/providers?per_page=100',{background:quiet}),api('/api/v1/providers/usage',{background:quiet})]);
+        return withLoading(['providers','provider-usage','admin-overview'], 'Loading data sources…', async () => {
+        const [providers,usage,overview] = await Promise.all([api('/api/v1/providers?per_page=100',{background:quiet}),api('/api/v1/providers/usage',{background:quiet}),api('/api/v1/admin/overview',{background:quiet})]);
         if (epoch !== state.epoch || !state.user?.is_admin || requestId !== providerRequest) return;
         state.providers = providers.data;
+        const o=overview.data;
+        $('admin-overview').innerHTML=`<div class="operations-stats">${[['Active providers',o.active_providers],['Pending predictions',o.pending_predictions],['Waiting over 5 minutes',o.stale_predictions],['Failed predictions · 24h',o.failed_predictions_24h],['Provider errors · 24h',o.provider_errors_24h],['Imported fixtures',o.imported_fixtures]].map(([label,count])=>`<article><small>${label}</small><strong>${count}</strong></article>`).join('')}</div><p class="panel-note">Fixtures last updated: ${o.fixtures_updated_at?esc(when(o.fixtures_updated_at)):'No imported fixtures yet'}. Pending counts show recorded work, not whether a worker is online. Failed predictions are refunded; they remain in history.</p>`;
         $('providers').innerHTML = providers.data.map(p => `<article class="fixture-card provider-card">${badge(p.is_active ? 'active' : 'paused')}<h3>${esc(p.name)}</h3><p>${p.driver === 'sample' ? 'Synthetic sample inputs' : p.driver === 'results' ? 'Recorded match results · local model' : 'Server-configured HTTP gateway'} · Weight ${esc(p.weight)}</p><button class="button secondary" data-provider="${p.id}">Configure ↗</button></article>`).join('') || empty('No providers configured','Add a match-results, sample or HTTP provider.');
         $('provider-usage').innerHTML = `<div class="section-heading ledger-heading"><h2>Provider activity</h2></div>${usage.data.length ? `<div class="table-wrap"><table><thead><tr><th>Source</th><th>Calls + cache reads</th><th>Cache hits</th><th>Failures</th><th>Average latency</th></tr></thead><tbody>${usage.data.map(s => `<tr><td>${esc(s.source)}</td><td>${s.calls}</td><td>${s.cache_hits}</td><td>${s.failures}</td><td>${number(s.average_ms,0)} ms</td></tr>`).join('')}</tbody></table></div>` : empty('No external requests yet','Sample predictions do not make network requests. Gateway and fixture-feed activity appears here.')}<div class="table-wrap"><table><thead><tr><th>Time</th><th>Source / operation</th><th>Status</th><th>HTTP</th><th>Duration</th></tr></thead><tbody>${usage.recent.map(c => `<tr><td>${esc(when(c.created_at))}</td><td>${esc(c.source)} / ${esc(c.operation)}</td><td>${esc(c.status)}</td><td>${c.http_status ?? '—'}</td><td>${c.duration_ms} ms</td></tr>`).join('') || '<tr><td colspan="5">No calls recorded.</td></tr>'}</tbody></table></div><h2 class="ledger-heading">Fixture synchronization</h2><div class="list-panel">${usage.syncs.map(s => `<div class="list-row"><div>Sync #${s.id}<small>${esc(when(s.created_at))} · ${s.imported} fixtures imported${s.error ? ` · ${esc(s.error)}` : ''}</small></div>${badge(s.status)}</div>`).join('') || empty('No synchronization runs','Configure FOOTBALL_DATA_TOKEN on the server, then sync fixtures.')}</div>`;
         }, {quiet});
@@ -274,18 +449,21 @@
         if (response.data.length > 1) $('fixture-form').elements.away_team_id.value = response.data[1].id;
     }
     function bindForm(id, handler) {
+        setupValidation($(id));
         $(id).addEventListener('submit',async event => {
             event.preventDefault(); const form = event.currentTarget, button = form.querySelector('button[type=submit], button.primary');
             const errorEl = form.querySelector('.form-error'); errorEl.textContent = '';
+            if(form.dataset.submitting==='true' || !validateForm(form)) return;
+            form.dataset.submitting='true';
             const restore = buttonLoading(button, id === 'login-form' ? 'Signing in…' : id === 'register-form' ? 'Creating workspace…' : 'Saving…');
-            try { await handler(form); } catch(error) { errorEl.textContent = error.message; } finally { restore(); }
+            try { await handler(form); } catch(error) { showFormError(form,error); } finally { form.dataset.submitting='false'; restore(); }
         });
     }
     bindForm('login-form',async form => {
-        await api('/session/login',{method:'POST',data:Object.fromEntries(new FormData(form))}); form.reset(); $('auth-dialog').close(); await loadIdentity(); await loadPrivate(); if(state.tab==='performance') await loadPerformance(); notice('Welcome back. Your workspace is ready.');
+        await api('/session/login',{method:'POST',data:Object.fromEntries(new FormData(form))}); form.reset(); $('auth-dialog').close(); await loadIdentity(); await loadPrivate(); if(state.tab==='performance') await loadPerformance(); if(state.tab==='profile') await loadProfile(); notice('Welcome back. Your workspace is ready.');
     });
     bindForm('register-form',async form => {
-        await api('/session/register',{method:'POST',data:Object.fromEntries(new FormData(form))}); form.reset(); $('register-dialog').close(); await loadIdentity(); await loadPrivate(); notice('Workspace created with 10 demo credits.');
+        await api('/session/register',{method:'POST',data:Object.fromEntries(new FormData(form))}); form.reset(); $('register-dialog').close(); await loadIdentity(); await loadPrivate(); if(state.tab==='profile') await loadProfile(); notice('Workspace created with 10 demo credits.');
     });
     let topupKey;
     bindForm('topup-form',async form => {
@@ -304,13 +482,17 @@
         const target = event.target.closest('button'); if (!target) return;
         try {
             if (target.hasAttribute('data-close')) target.closest('dialog').close();
+            else if (target.hasAttribute('data-logout')) await signOut(target);
+            else if (target.dataset.avatar) { $('profile-form').elements.avatar.value=target.dataset.avatar; document.querySelectorAll('[data-avatar]').forEach(button=>button.setAttribute('aria-pressed',String(button===target))); }
+            else if (target.dataset.adminView) setAdminView(target.dataset.adminView);
             else if (target.dataset.tab) setTab(target.dataset.tab);
             else if (target.hasAttribute('data-match-view')) { $('status-filter').value = target.dataset.matchView; $('filters').requestSubmit(); }
             else if (target.dataset.retry) {
-                const retries = {standings:loadStandings,fixtures:loadFixtures,predictions:loadPrivate,ledger:loadPrivate,performance:loadPerformance,providers:loadProviders,'provider-usage':loadProviders,'detail-body':() => openFixture(state.detailTarget.id,state.detailTarget.predictionId)};
+                const retries = {'track-record':loadTrackRecord,profile:loadProfile,'admin-overview':loadProviders,standings:loadStandings,fixtures:loadFixtures,predictions:loadPrivate,ledger:loadPrivate,performance:loadPerformance,providers:loadProviders,'provider-usage':loadProviders,'detail-body':() => openFixture(state.detailTarget.id,state.detailTarget.predictionId)};
                 await retries[target.dataset.retry]?.(); $('notice').hidden = true;
             }
             else if (target.hasAttribute('data-signin')) $('auth-dialog').showModal();
+            else if (target.dataset.club) await loadClubProfile(target);
             else if (target.dataset.fixture) await openFixture(Number(target.dataset.fixture));
             else if (target.dataset.prediction) { const p = state.predictions.find(p => p.id === Number(target.dataset.prediction)); await openFixture(p.fixture_id,p.id); }
             else if (target.id === 'generate') await generate(target);
@@ -322,22 +504,23 @@
     });
     $('detail-body').addEventListener('submit',async event => {
         if (event.target.id !== 'result-form') return; event.preventDefault();
-        const form = event.target, button = form.querySelector('button'); button.disabled = true;
+        const form = event.target, button = form.querySelector('button'); if(!validateForm(form)) return; const restore=buttonLoading(button,'Saving score…');
         try { await api(`/api/v1/fixtures/${state.selected.id}/result`,{method:'PUT',data:Object.fromEntries(new FormData(form))}); await openFixture(state.selected.id); await loadFixtures(); notice('Final score recorded.'); }
-        catch(error) { form.querySelector('.form-error').textContent = error.message; button.disabled = false; }
+        catch(error) { showFormError(form,error); } finally {restore();}
     });
-    $('account').addEventListener('click',async () => {
-        if (!state.user) { $('auth-dialog').showModal(); return; }
-        $('account').disabled = true;
-        try { await api('/session/logout',{method:'POST',data:{}}); state.user=null; state.companies=[]; state.company=null; state.epoch++; state.keys.clear(); renderIdentity(); setTab('matches'); await loadPrivate(); $('providers').innerHTML = $('provider-usage').innerHTML = $('performance').innerHTML = ''; notice('You are signed out.'); }
-        catch(error) { notice(error.message,true); }
-        finally { $('account').disabled = false; }
-    });
+    $('account').onclick = () => state.user ? setTab('profile') : $('auth-dialog').showModal();
+    $('logout').onclick = () => signOut($('logout'));
     $('show-register').onclick = () => { $('auth-dialog').close(); $('register-dialog').showModal(); };
-    $('company').onchange = async () => { state.company=Number($('company').value); state.epoch++; state.historyPage=1; state.predictions=[]; state.detailVersion++; $('detail-dialog').close(); renderIdentity(); $('prediction-count').textContent = $('credit-count').textContent = '…'; $('predictions').innerHTML = $('ledger').innerHTML = empty('Loading company data…',''); $('performance').innerHTML = ''; renderFixtures(); try { await loadPrivate(); if(state.tab==='performance') await loadPerformance(); } catch(error) { notice(error.message,true); } };
-    $('reset-filters').onclick = () => { $('search').value = ''; $('league-filter').value = String(state.leagues.find(l => l.source === 'football-data')?.id || ''); $('status-filter').value = 'upcoming'; $('filters').requestSubmit(); };
-    $('status-filter').addEventListener('change',updateMatchViews);
-    $('filters').onsubmit = async event => { event.preventDefault(); state.page=1; const restore=buttonLoading($('filters').querySelector('button'),'Finding matches…'); try { await loadFixtures(); } catch(error) { notice(error.message,true); } finally { restore(); } };
+    $('company').onchange = async () => { state.company=Number($('company').value); state.epoch++; state.historyPage=1; state.predictions=[]; state.detailVersion++; $('detail-dialog').close(); renderIdentity(); $('prediction-count').textContent = $('credit-count').textContent = '…'; $('predictions').innerHTML = $('ledger').innerHTML = empty('Loading workspace data…',''); $('performance').innerHTML = ''; $('track-record').innerHTML = ''; renderFixtures(); try { await loadPrivate(); if(state.tab==='performance') await loadPerformance(); if(state.tab==='providers' && state.adminView==='record') await loadTrackRecord(); } catch(error) { notice(error.message,true); } };
+    $('reset-filters').onclick = () => { $('search').value = ''; $('league-filter').selectedIndex=0; $('season-filter').value=''; matchRounds(); $('matchday-filter').value=''; $('status-filter').value = 'upcoming'; $('filters').requestSubmit(); };
+    $('search').addEventListener('input',()=>{clearTimeout(searchTimer); fixtureRequest++; state.page=1; searchTimer=setTimeout(()=>$('filters').requestSubmit(),300);});
+    for(const id of ['league-filter','season-filter','matchday-filter','status-filter']) $(id).addEventListener('change',()=>{
+        if(['league-filter','season-filter'].includes(id)) { $('matchday-filter').value=''; matchRounds(); }
+        $('filters').requestSubmit();
+    });
+    $('record-filters').onsubmit=async event=>{event.preventDefault();const restore=buttonLoading($('record-filters').querySelector('button'),'Loading report…');try{await loadTrackRecord();}catch(error){notice(error.message,true);}finally{restore();}};
+    for(const id of ['record-league','record-season','record-matchday','record-quality']) $(id).onchange=()=>{if(['record-league','record-season'].includes(id)){$('record-matchday').value='';recordRounds();}loadTrackRecord().catch(error=>notice(error.message,true));};
+    $('filters').onsubmit = async event => { event.preventDefault(); clearTimeout(searchTimer); state.page=1; const restore=buttonLoading($('filters').querySelector('button'),'Finding matches…'); try { await loadFixtures(); } catch(error) { notice(error.message,true); } finally { restore(); } };
     for (const [id,delta] of [['fixtures-prev',-1],['fixtures-next',1]]) $(id).onclick = () => { state.page+=delta; loadFixtures().catch(error => notice(error.message,true)); };
     for (const [id,delta] of [['predictions-prev',-1],['predictions-next',1]]) $(id).onclick = () => { state.historyPage+=delta; loadPrivate().catch(error => notice(error.message,true)); };
     $('refresh-predictions').onclick = async () => { const restore=buttonLoading($('refresh-predictions'),'Refreshing…'); try { await loadPrivate(); } catch(error) { notice(error.message,true); } finally { restore(); } };
@@ -359,13 +542,16 @@
                 if (epoch===state.epoch && version===state.detailVersion) { state.prediction=response.data; renderDetail(); }
             }
             if (state.predictions.some(p=>p.status==='pending')) await loadPrivate({quiet:true});
-            if (state.tab==='providers') await loadProviders({quiet:true});
-        } catch(error) { if(error.status===401) { notice('Your session expired. Sign in again.',true); state.company=null; } }
+            if (state.tab==='providers' && state.adminView!=='record') await loadProviders({quiet:true});
+        } catch(error) { if($('prediction-sync')) $('prediction-sync').textContent='Unable to refresh the result. Retrying automatically…'; if(error.status===401) { notice('Your session expired. Sign in again.',true); state.company=null; } }
         finally { state.polling=false; }
     }
+    document.querySelectorAll('.sidebar [data-tab]').forEach(button=>button.title=button.textContent.replace(/\d+/g,'').trim());
     document.querySelector('[data-tab=matches]').setAttribute('aria-current','page');
     $('fixtures').innerHTML = skeleton('Loading your match center…',true);
     $('fixtures').setAttribute('aria-busy','true');
-    (async () => { try { await Promise.all([loadIdentity(),loadLeagues()]); await Promise.all([loadFixtures(),loadPrivate()]); } catch(error) { notice(error.message,true); if (!$('fixtures').querySelector('.load-error')) { $('fixtures').innerHTML=empty('Unable to load the workspace','Reload the page to try again.'); $('fixtures').setAttribute('aria-busy','false'); } } })();
+    function currentTab() {return location.pathname==='/profile'?'profile':location.hash.slice(1)||'matches';}
+    addEventListener('popstate',()=>setTab(currentTab(),false));
+    (async () => { try { await Promise.all([loadIdentity(),loadLeagues()]); setTab(currentTab(),false); await Promise.all([loadFixtures(),loadPrivate()]); } catch(error) { notice(error.message,true); if (!$('fixtures').querySelector('.load-error')) { $('fixtures').innerHTML=empty('Unable to load the workspace','Reload the page to try again.'); $('fixtures').setAttribute('aria-busy','false'); } } })();
     setInterval(poll,4000);
 })();

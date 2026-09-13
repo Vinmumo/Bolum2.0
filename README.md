@@ -184,3 +184,9 @@ A solo user can use their own workspace. Shared workspaces support groups of ana
 Administrators can open Operations → Gameweek track record, choose a league, season, completed/partly completed gameweek and input category, and inspect actual scores alongside Bolum's saved forecasts for the selected workspace. Correctness compares the home/draw/away outcome, not the exact scoreline. Missing forecasts and unfinished matches are excluded from the accuracy denominator. With zero eligible forecasts, accuracy is shown as unavailable rather than zero percent.
 
 The report reuses Performance's eligibility rules. A past game without a saved pre-kickoff forecast says so. It does not create or charge for predictions, reconstruct past knowledge from today's data, or present retrospective simulations as a historical record. Historical simulation would need a separate labeled workflow and sufficient timestamped earlier inputs. Imported results alone do not establish prior forecasts.
+
+## Club guide and API testing
+
+Match details now include an on-demand **Club guide** for imported teams. TheSportsDB supplies stadium, location, founding year and short club context, with loading/retry states and attribution. These fields do not feed prediction calculations. The server uses the public free API key by default; set `SPORTSDB_API_KEY` to your own key or blank to disable. See [Integrations](docs/INTEGRATIONS.md).
+
+Use the [Postman walkthrough and collection](docs/POSTMAN.md) to test endpoints, [Permissions](docs/PERMISSIONS.md) to understand access control, and [Testing](docs/TESTING.md) to understand the automated checks.

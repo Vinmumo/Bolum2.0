@@ -14,6 +14,7 @@ Base URL: `http://127.0.0.1:8000/api/v1`. Send `Accept: application/json` and JS
 | GET | `/leagues/{league}/standings` | Public imported league table; cached 10 minutes, 10 reads/minute/IP |
 | POST | `/leagues` | Admin; name and country |
 | GET | `/teams` | Public paginated list |
+| GET | `/teams/{team}/profile` | Public imported-club information from TheSportsDB; cached one hour, 10 football reads/minute/IP; 404 unmatched, 503 unavailable |
 | POST | `/teams` | Admin; name and league_id |
 | GET | `/fixtures` | Public paginated list; optional league_id and upcoming=1 |
 | GET | `/fixtures/{fixture}` | Public detail plus recent `form` |
@@ -143,3 +144,26 @@ Within a selected data category, only the latest eligible prediction per fixture
 `GET /fixtures/{fixture}` additionally returns top-level `form: {cutoff_at, source, order, home, away}`. Each team has up to five eligible matches, newest first, with `fixture_id`, `kickoff_at`, `venue`, `opponent`, `goals_for`, `goals_against`, and `outcome` (W/D/L). Scores and outcomes follow that team's perspective. Eligibility requires same-league imported final results, kickoff within the last year, and result observation/update no later than the earlier of now and the viewed fixture's kickoff. Local fixtures have empty form. An empty history is not evidence of zero prior games.
 
 For an active `results` provider, prediction requests need 20 eligible league matches and 3 per team. Otherwise they return 409 without a prediction or debit. Accepted requests store `fixture_snapshot.results_inputs`; a completed result repeats those inputs under the matching source's `evidence`. This includes rates, match counts, fixture IDs, observation cutoff, model version, smoothing/decay parameters and limited-sample status. `data_quality: external` includes real-result models and configured HTTP inputs; `sample` and `mixed` remain separate. No API token is required for calculating from already imported results.
+
+
+## User profiles and operations
+
+- `GET /profile`: authenticated user's `id`, `name`, `email`, `avatar`, `created_at` and `is_admin`. No user ID selector or secrets are returned.
+- `PATCH /profile`: authenticated account update with required `name` (nonblank, at most 100 characters) and `avatar` (`football`, `captain`, `keeper`, `trophy`, `stadium`, `lightning`). Email and administrative fields are not writable through this endpoint.
+- `PUT /profile/password`: requires `current_password`, a different `password` of at least ten characters, and matching `password_confirmation`. A successful update revokes all of that user's API tokens, deletes their database-backed sessions, resets the remember token and signs out the current browser session. The response tells the caller to sign in again. With other session drivers, Sanctum's password-hash session check rejects previously initialized sessions on their next authenticated API request.
+- `GET /admin/overview`: global catalog administrator only. Returns active provider, pending/stale prediction, recent failed prediction, recent provider error and imported fixture counts, plus sync/fixture update times. It does not expose individual companies' predictions or queue payloads.
+
+Account writes share a limit of ten requests/minute per authenticated user, separate from the login IP limit. All browser mutations use the existing session/CSRF protection. Server validation errors return `422` with field-keyed `errors`; the dashboard shows these alongside the corresponding inputs. Avatar choices are local presets, with no upload or external URL support.
+
+
+## Fixture filter options and gameweek record
+
+`GET /fixtures` additionally supports `matchday` (integer 1–100) alongside `league_id`, `season`, `q` and status filters. `GET /fixtures/filter-options` returns up to 2,000 grouped `{league_id, season, matchday, fixtures, finished}` entries derived from the catalog. The dashboard uses these to populate season/gameweek controls. These options do not generate forecasts or fetch another provider.
+
+`GET /companies/{company}/track-record?league_id=2&season=2026&matchday=3&quality=external` requires both workspace membership and global catalog administrator permission. League, season and matchday are required; quality accepts `external`, `sample` or `mixed` (default external). The report covers at most 100 fixtures per round. It returns fixture/finished/evaluated/correct/missing-forecast counts, nullable accuracy and rows with teams, kickoff, actual score, saved forecast, and nullable correctness. Forecasts contain their saved ID/time, selected outcome, probabilities and optional most-likely score.
+
+Only the latest eligible completed pre-kickoff forecast in the selected workspace/category is considered for each fixture. Team identities must still match and request/completion must precede both original and current kickoff. Missing and malformed probability records are excluded. A missing forecast has `forecast: null`; an unfinished or unevaluated fixture has `correct: null`. Accuracy is `correct / evaluated`, or null when no forecasts can be evaluated. The endpoint is read-only and never retroactively generates predictions.
+
+The browser uses “workspace” for the existing Company relationship. API paths and ownership semantics remain unchanged.
+
+For guided local requests and an importable collection, see [Postman](POSTMAN.md). See [Permissions](PERMISSIONS.md) for role boundaries.

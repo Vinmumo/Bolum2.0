@@ -1,18 +1,28 @@
 <?php
 
+use App\Http\Controllers\AdminOverviewController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\CatalogController;
+use App\Http\Controllers\ClubProfileController;
 use App\Http\Controllers\CreditController;
 use App\Http\Controllers\FixtureController;
+use App\Http\Controllers\FixtureOptionsController;
 use App\Http\Controllers\FixtureResultController;
 use App\Http\Controllers\FixtureSyncController;
 use App\Http\Controllers\PerformanceController;
 use App\Http\Controllers\PredictionController;
+use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ProviderUsageController;
 use App\Http\Controllers\StandingsController;
+use App\Http\Controllers\TrackRecordController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function () {
+    Route::get('teams/{team}/profile', ClubProfileController::class)->middleware('throttle:football-read');
+    Route::get('profile', [ProfileController::class, 'show'])->middleware('auth:sanctum');
+    Route::patch('profile', [ProfileController::class, 'update'])->middleware(['auth:sanctum', 'throttle:account']);
+    Route::put('profile/password', [ProfileController::class, 'password'])->middleware(['auth:sanctum', 'throttle:account']);
+    Route::get('admin/overview', AdminOverviewController::class)->middleware(['auth:sanctum', 'can:manage-catalog']);
     Route::get('leagues/{league}/standings', StandingsController::class)->middleware('throttle:football-read');
     Route::middleware('throttle:auth')->group(function () {
         Route::post('auth/register', [AuthController::class, 'register']);
@@ -27,6 +37,7 @@ Route::prefix('v1')->group(function () {
         Route::post($catalog, [CatalogController::class, 'store'])->defaults('catalog', $catalog)->middleware('auth:sanctum');
     }
     Route::put('providers/{provider}', [CatalogController::class, 'update'])->defaults('catalog', 'providers')->middleware('auth:sanctum');
+    Route::get('fixtures/filter-options', FixtureOptionsController::class);
     Route::apiResource('fixtures', FixtureController::class)->only(['index', 'show']);
     Route::apiResource('fixtures', FixtureController::class)->only(['store', 'update', 'destroy'])->middleware('auth:sanctum');
 });
@@ -47,3 +58,5 @@ Route::get('v1/providers/usage', ProviderUsageController::class)->middleware(['a
 Route::post('v1/fixtures/sync', FixtureSyncController::class)->middleware(['auth:sanctum', 'can:manage-catalog', 'throttle:predictions']);
 Route::put('v1/fixtures/{fixture}/result', FixtureResultController::class)->middleware(['auth:sanctum', 'can:manage-catalog']);
 Route::get('v1/companies/{company}/performance', PerformanceController::class)->middleware(['auth:sanctum', 'company.member']);
+
+Route::get('v1/companies/{company}/track-record', TrackRecordController::class)->middleware(['auth:sanctum', 'company.member', 'can:manage-catalog']);

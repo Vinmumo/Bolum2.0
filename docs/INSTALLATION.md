@@ -45,7 +45,7 @@ php --ini
 php -m
 ```
 
-Check for `pdo_sqlite` for SQLite or `pdo_mysql` for MySQL. If Composer says an extension is missing, enable it in the PHP configuration reported by `php --ini`, then reopen the terminal if your PATH changed. The setup commands above do not depend on Unix `touch`, `cp`, or shell environment-variable syntax.
+Check for `pdo_sqlite` for SQLite or `pdo_mysql` for MySQL, and `fileinfo` (required by the filesystem packages). If Windows Composer reports `ext-fileinfo` missing, enable `extension=fileinfo` in the CLI PHP configuration and verify `php --ri fileinfo` before retrying `composer install`. If Composer says an extension is missing, enable it in the PHP configuration reported by `php --ini`, then reopen the terminal if your PATH changed. The setup commands above do not depend on Unix `touch`, `cp`, or shell environment-variable syntax.
 
 ### Manual setup
 

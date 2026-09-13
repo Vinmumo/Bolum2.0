@@ -1,7 +1,14 @@
 import { test, expect } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 
-test('imported league opens on upcoming fixtures and all matches remains available', async ({ page }) => {
+// Each scenario keeps real rate limiting but starts with its own request budget.
+// This is the temporary database created by playwright.config.js, not the app DB.
+test.beforeEach(() => {
+    if (!process.env.BOLUM_BROWSER_DATABASE) throw new Error('Temporary browser database required.');
+    execFileSync('php',['artisan','cache:clear'],{env:{...process.env,APP_ENV:'local',DB_CONNECTION:'sqlite',DB_DATABASE:process.env.BOLUM_BROWSER_DATABASE,CACHE_STORE:'database'}});
+});
+
+test('single imported league stays selected while all match statuses remain available', async ({ page }) => {
     await page.route('**/api/v1/leagues?*', route => route.fulfill({json:{data:[
         {id:1,name:'Demo Premier League',country:'England',source:'local'},
         {id:2,name:'Premier League',country:'England',source:'football-data'},
@@ -22,11 +29,11 @@ test('imported league opens on upcoming fixtures and all matches remains availab
     expect(requests[0].searchParams.get('league_id')).toBe('2');
     expect(requests[0].searchParams.get('upcoming')).toBe('1');
     expect(requests[0].searchParams.has('status')).toBe(false);
-    await page.locator('#league-filter').selectOption('');
+    await expect(page.locator('#league-filter')).toBeDisabled();
     await page.locator('#status-filter').selectOption('');
     await page.getByRole('button', {name:'Apply filters'}).click();
-    await expect(page.locator('#fixture-context')).toContainText('imported and local');
-    expect(requests.at(-1).searchParams.has('league_id')).toBe(false);
+    await expect(page.locator('#fixture-context')).toContainText('Real fixtures');
+    expect(requests.at(-1).searchParams.get('league_id')).toBe('2');
     expect(requests.at(-1).searchParams.has('upcoming')).toBe(false);
 });
 
@@ -205,7 +212,7 @@ test('cookie login requires CSRF and logout revokes session access', async ({ pa
     expect(await page.evaluate(() => localStorage.length)).toBe(0);
     const me = await page.evaluate(async () => (await fetch('/api/v1/auth/me', { headers:{Accept:'application/json'} })).status);
     expect(me).toBe(200);
-    await page.locator('#account').click();
+    await page.locator('#logout').click();
     await expect(page.locator('#account')).toContainText('Sign in');
     const after = await page.evaluate(async () => (await fetch('/api/v1/auth/me', { headers:{Accept:'application/json'} })).status);
     expect(after).toBe(401);
@@ -236,7 +243,7 @@ test('member permissions, owner top-up, and missing provider configuration', asy
     await signIn(page, 'member@bolum.test');
     await expect(page.locator('[data-tab=providers]')).not.toBeVisible();
     await expect(page.locator('#topup-button')).not.toBeVisible();
-    await page.locator('#account').click();
+    await page.locator('#logout').click();
     await signIn(page);
     await expect(page.locator('#credit-count')).toHaveText(/^\d+$/);
     const original = Number(await page.locator('#credit-count').textContent());
@@ -246,6 +253,9 @@ test('member permissions, owner top-up, and missing provider configuration', asy
     await expect(page.locator('#credit-count')).toHaveText(String(original + 5));
     await page.locator('[data-tab=providers]').click();
     await expect(page.locator('#providers')).toContainText('Sample Football');
+    await expect(page.locator('#admin-overview')).toContainText('Pending predictions');
+    await expect(page.locator('body')).toHaveClass(/operations-mode/);
+    await page.screenshot({path:'/tmp/bolum-operations-desktop.png',fullPage:true});
     await page.locator('#sync-fixtures').click();
     await expect(page.locator('#notice')).toContainText('Configure the football-data.org token');
 });
@@ -259,7 +269,7 @@ test('company switching clears private history and browser registration creates 
     await expect(page.locator('#predictions')).toContainText('No predictions yet');
     await expect(page.locator('#credit-count')).toHaveText('0');
     await expect(page.locator('#topup-button')).not.toBeVisible();
-    await page.locator('#account').click();
+    await page.locator('#logout').click();
     await expect(page.locator('#account')).toContainText('Sign in');
     await expect(page.locator('#account')).toBeEnabled();
     await page.locator('#account').click();
@@ -330,4 +340,181 @@ test('match form and forecast provenance explain real results without claiming s
     await page.setViewportSize({width:390,height:844});
     expect(await page.locator('#detail-body').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
     await page.screenshot({path:'/tmp/bolum-results-form-mobile.png',fullPage:true});
+});
+
+
+test('registration validates fields and displays server validation beside inputs', async ({page})=>{
+    await page.goto('/');
+    await page.locator('#account').click();
+    await page.locator('#show-register').click();
+    const form=page.locator('#register-form');
+    await form.locator('[type=submit]').click();
+    await expect(form.locator('[name=name]')).toHaveAttribute('aria-invalid','true');
+    await expect(form.locator('[name=name]')).toBeFocused();
+    await form.locator('[name=name]').fill('Test User');
+    await form.locator('[name=company_name]').fill('Test Workspace');
+    await form.locator('[name=email]').fill('admin@bolum.test');
+    await form.locator('[name=password]').fill('new-password');
+    await form.locator('[name=password_confirmation]').fill('different-password');
+    await form.locator('[type=submit]').click();
+    await expect(form.locator('#register-form-password_confirmation-error')).toHaveText('Passwords do not match.');
+    await form.locator('[name=password_confirmation]').fill('new-password');
+    await form.locator('[type=submit]').click();
+    await expect(form.locator('[name=email]')).toHaveAttribute('aria-invalid','true');
+    await expect(form.locator('#register-form-email-error')).toContainText('already been taken');
+});
+
+test('profile persists name and avatar and password change requires signing in again',async({page})=>{
+    await signIn(page);
+    await page.locator('#account').click();
+    await expect(page).toHaveURL(/\/profile$/);
+    const form=page.locator('#profile-form');
+    await form.locator('[name=name]').fill('Bolum Captain');
+    await page.locator('[data-avatar=captain]').click();
+    await form.getByRole('button',{name:'Save changes'}).click();
+    await expect(page.locator('.profile-identity')).toContainText('Bolum Captain');
+    await page.reload();
+    await expect(page.locator('[data-avatar=captain]')).toHaveAttribute('aria-pressed','true');
+    await page.screenshot({path:'/tmp/bolum-profile-desktop.png',fullPage:true});
+    await page.setViewportSize({width:390,height:844});
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+    await page.screenshot({path:'/tmp/bolum-profile-mobile.png',fullPage:true});
+    const security=page.locator('#password-form');
+    await security.locator('[name=current_password]').fill('password123');
+    await security.locator('[name=password]').fill('updated-password');
+    await security.locator('[name=password_confirmation]').fill('updated-password');
+    await security.getByRole('button',{name:'Change password'}).click();
+    await expect(page.locator('#auth-dialog')).toBeVisible();
+    await page.locator('#login-form [name=email]').fill('admin@bolum.test');
+    await page.locator('#login-form [name=password]').fill('updated-password');
+    await page.locator('#login-form [type=submit]').click();
+    await expect(page.locator('#auth-dialog')).not.toBeVisible();
+    await expect(page.locator('#account')).toContainText('Bolum Captain');
+    execFileSync('php',['-r',`$pdo=new PDO('sqlite:'.getenv('BOLUM_BROWSER_DATABASE')); $query=$pdo->prepare('UPDATE users SET password=? WHERE email=?'); $query->execute([password_hash('password123', PASSWORD_BCRYPT), 'admin@bolum.test']);`],{env:process.env});
+});
+
+test('prediction requests show progress and an inline recoverable failure',async({page})=>{
+    await signIn(page,'member@bolum.test');
+    await page.locator('[data-fixture]').first().click();
+    let release;
+    const gate=new Promise(resolve=>release=resolve);
+    await page.route('**/api/v1/companies/*/fixtures/*/predictions',async route=>{
+        if(route.request().method()!=='POST') return route.continue();
+        await gate; return route.fulfill({status:409,json:{message:'Not enough recorded results for this fixture.'}});
+    });
+    await page.locator('#generate').click();
+    await expect(page.locator('#prediction-feedback')).toContainText('Checking match data');
+    await expect(page.locator('#generate')).toBeDisabled();
+    release();
+    await expect(page.locator('#prediction-feedback [role=alert]')).toContainText('Not enough recorded results');
+    await expect(page.locator('#generate')).toBeEnabled();
+});
+
+
+test('sidebar expands by default and remembers a keyboard-accessible collapsed preference',async({page})=>{
+    await page.goto('/');
+    await expect(page.locator('html')).toHaveAttribute('data-sidebar','expanded');
+    await page.getByRole('button',{name:'Collapse sidebar',exact:true}).focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('html')).toHaveAttribute('data-sidebar','collapsed');
+    await page.reload();
+    await expect(page.getByRole('button',{name:'Expand sidebar',exact:true})).toHaveAttribute('aria-expanded','false');
+    await page.getByRole('button',{name:'Expand sidebar',exact:true}).click();
+    await page.setViewportSize({width:390,height:844});
+    await page.getByRole('button',{name:'Collapse sidebar',exact:true}).click();
+    await expect(page.locator('#main-navigation')).not.toBeVisible();
+    await page.getByRole('button',{name:'Expand sidebar',exact:true}).click();
+    await expect(page.locator('#main-navigation')).toBeVisible();
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+});
+
+test('search is debounced and a slow previous search cannot replace the latest results',async({page})=>{
+    await page.goto('/');
+    await expect(page.locator('.fixture-card')).toHaveCount(4);
+    let release, oldStarted=false;
+    const gate=new Promise(resolve=>release=resolve), queries=[];
+    await page.route('**/api/v1/fixtures?*',async route=>{
+        const q=new URL(route.request().url()).searchParams.get('q');queries.push(q);
+        if(q==='North') {oldStarted=true;await gate;}
+        return route.continue();
+    });
+    await page.locator('#search').fill('North');
+    await expect.poll(()=>oldStarted).toBe(true);
+    await page.locator('#search').fill('M');
+    await page.locator('#search').fill('Man');
+    await page.locator('#search').fill('Manchester');
+    await expect(page.locator('.fixture-card')).toHaveCount(2);
+    await expect(page.locator('.fixture-card').first()).toContainText('Manchester');
+    release();
+    await expect(page.locator('#search')).toHaveValue('Manchester');
+    await expect(page.locator('.fixture-card').last()).toContainText('Manchester');
+    expect(queries).toEqual(['North','Manchester']);
+});
+
+test('gameweek filters use available rounds and multiple imported leagues unlock selection',async({page})=>{
+    await page.route('**/api/v1/leagues?*',route=>route.fulfill({json:{data:[{id:1,name:'Premier League',source:'football-data'},{id:2,name:'La Liga',source:'football-data'}]}}));
+    await page.route('**/api/v1/fixtures/filter-options',route=>route.fulfill({json:{data:[{league_id:1,season:'2026',matchday:3,fixtures:10,finished:10},{league_id:1,season:'2026',matchday:4,fixtures:10,finished:0},{league_id:2,season:'2026',matchday:5,fixtures:10,finished:0}]}}));
+    const requests=[];
+    await page.route('**/api/v1/fixtures?*',route=>{requests.push(new URL(route.request().url()));return route.continue();});
+    await page.goto('/');
+    await expect(page.locator('#league-filter')).toBeEnabled();
+    await page.locator('#matchday-filter').selectOption('4');
+    await expect.poll(()=>requests.at(-1)?.searchParams.get('matchday')).toBe('4');
+    expect(requests.at(-1).searchParams.get('season')).toBe('2026');
+    await page.locator('#league-filter').selectOption('2');
+    await expect(page.locator('#matchday-filter option')).toHaveCount(2);
+    await expect(page.locator('#matchday-filter')).toHaveValue('');
+    await expect.poll(()=>requests.at(-1)?.searchParams.get('league_id')).toBe('2');
+});
+
+test('admin gameweek track record distinguishes missing forecasts and the control-room theme',async({page})=>{
+    await page.route('**/api/v1/fixtures/filter-options',route=>route.fulfill({json:{data:[{league_id:1,season:'2026',matchday:3,fixtures:3,finished:3}]}}));
+    await page.route('**/api/v1/companies/*/track-record?*',route=>route.fulfill({json:{data:{fixtures:3,finished:3,evaluated:2,correct:1,accuracy:.5,missing_forecasts:1,method:'Latest saved pre-kickoff forecast per fixture.',rows:[
+        {home_team:'Arsenal FC',away_team:'Chelsea FC',kickoff_at:'2026-09-01T12:00:00Z',score:{home:2,away:0},forecast:{pick:'home_win',created_at:'2026-08-31T12:00:00Z',probabilities:{home_win:.6,draw:.2,away_win:.2},score:{home:2,away:1}},correct:true},
+        {home_team:'Liverpool FC',away_team:'Manchester City FC',kickoff_at:'2026-09-01T12:00:00Z',score:{home:1,away:3},forecast:{pick:'home_win',created_at:'2026-08-31T12:00:00Z',probabilities:{home_win:.6,draw:.2,away_win:.2}},correct:false},
+        {home_team:'Fulham FC',away_team:'Everton FC',kickoff_at:'2026-09-01T12:00:00Z',score:{home:0,away:0},forecast:null,correct:null},
+    ]}}}));
+    await signIn(page,'member@bolum.test');
+    await expect(page.locator('[data-tab=providers]')).not.toBeVisible();
+    await page.locator('#logout').click();
+    await signIn(page);
+    await page.locator('[data-tab=providers]').click();
+    await page.getByRole('button',{name:'Gameweek track record',exact:true}).click();
+    await expect(page.locator('.track-table tbody tr')).toHaveCount(3);
+    await expect(page.locator('.track-summary')).toContainText('50%');
+    await expect(page.locator('.track-table')).toContainText('No saved pre-match forecast');
+    await expect(page.locator('.track-status.correct')).toHaveCount(1);
+    await expect(page.locator('.track-status.incorrect')).toHaveCount(1);
+    expect(await page.locator('body').evaluate(el=>getComputedStyle(el).getPropertyValue('--accent').trim())).toBe('#f2c66d');
+    await page.screenshot({path:'/tmp/bolum-track-record-desktop.png',fullPage:true});
+    await page.setViewportSize({width:390,height:844});
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+    await page.screenshot({path:'/tmp/bolum-track-record-mobile.png',fullPage:true});
+});
+
+test('club guide loads on demand with retry, attribution and escaped content', async ({ page }) => {
+    const fixture = {id:900,league:{id:1,name:'Premier League'},home_team:{id:71,name:'Arsenal FC'},away_team:{id:72,name:'Liverpool FC'},kickoff_at:new Date(Date.now()+86400000).toISOString(),status:'scheduled',is_finished:false,source:'football-data',score:{home:null,away:null}};
+    await page.route('**/api/v1/fixtures?*', route => route.fulfill({json:{data:[fixture],meta:{total:1,current_page:1,last_page:1},links:{prev:null,next:null}}}));
+    await page.route('**/api/v1/fixtures/900', route => route.fulfill({json:{data:fixture}}));
+    let calls=0, release;
+    const gate=new Promise(resolve=>release=resolve);
+    await page.route('**/api/v1/teams/71/profile', async route => {
+        calls++;
+        if(calls===1){await gate;return route.fulfill({status:503,json:{message:'Club information is temporarily unavailable.'}});}
+        return route.fulfill({json:{data:{name:'Arsenal',stadium:'Emirates Stadium',location:'London',formed_year:1886,description:'<img src=x onerror=alert(1)>',source:'TheSportsDB',source_url:'https://www.thesportsdb.com/team/133604',fetched_at:new Date().toISOString()}}});
+    });
+    await page.goto('/');
+    await page.locator('[data-fixture="900"]').click();
+    await expect(page.getByRole('heading',{name:'Club guide'})).toBeVisible();
+    expect(calls).toBe(0);
+    await page.getByRole('button',{name:'Arsenal FC info'}).click();
+    await expect(page.locator('#club-profile')).toContainText('Loading club information');
+    release();
+    await expect(page.locator('#club-profile')).toContainText('temporarily unavailable');
+    await page.getByRole('button',{name:'Retry club information'}).click();
+    await expect(page.locator('#club-profile')).toContainText('Emirates Stadium');
+    await expect(page.locator('#club-profile')).toContainText('<img src=x onerror=alert(1)>');
+    await expect(page.locator('#club-profile img')).toHaveCount(0);
+    await expect(page.locator('#club-profile a')).toHaveAttribute('href','https://www.thesportsdb.com/team/133604');
+    await expect(page.locator('#club-profile')).toContainText('Not used in prediction calculations');
 });

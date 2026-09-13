@@ -2,18 +2,30 @@
 
 namespace App\Data;
 
-final readonly class CreateFixtureData
+use App\Data\Concerns\ValidatesFixtureTeams;
+use Spatie\LaravelData\Data;
+use Spatie\LaravelData\Optional;
+
+class CreateFixtureData extends Data
 {
-    public function __construct(public int $leagueId, public int $homeTeamId, public int $awayTeamId, public string $kickoffAt, public ?bool $isFinished = null) {}
+    use ValidatesFixtureTeams;
 
-    /** Build only from input already accepted by a Form Request. */
-    public static function fromValidated(array $data): self
-    {
-        return new self((int) $data['league_id'], (int) $data['home_team_id'], (int) $data['away_team_id'], $data['kickoff_at'], isset($data['is_finished']) ? (bool) $data['is_finished'] : null);
-    }
+    public function __construct(
+        public int $league_id,
+        public int $home_team_id,
+        public int $away_team_id,
+        public string $kickoff_at,
+        public Optional|bool $is_finished = new Optional,
+    ) {}
 
-    public function attributes(): array
+    public static function rules(): array
     {
-        return array_filter(['league_id' => $this->leagueId, 'home_team_id' => $this->homeTeamId, 'away_team_id' => $this->awayTeamId, 'kickoff_at' => $this->kickoffAt, 'is_finished' => $this->isFinished], fn ($value) => $value !== null);
+        return [
+            'league_id' => ['required', 'integer', 'exists:leagues,id'],
+            'home_team_id' => ['required', 'integer', 'exists:teams,id'],
+            'away_team_id' => ['required', 'integer', 'exists:teams,id'],
+            'kickoff_at' => ['required', 'date'],
+            'is_finished' => ['sometimes', 'boolean'],
+        ];
     }
 }

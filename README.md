@@ -193,4 +193,4 @@ Use the [Postman walkthrough and collection](docs/POSTMAN.md) to test endpoints,
 
 ## Backend organization
 
-API controllers live in `app/Http/Controllers/Api`. Form Requests validate inputs, immutable Data objects carry accepted values, and Actions implement individual operations with transactions where needed. Services hold prediction calculations, reporting and provider integrations; Jobs run background workflows. See [Architecture](docs/ARCHITECTURE.md#actions-and-typed-input) and [Development](docs/DEVELOPMENT.md).
+API controllers live in `app/Http/Controllers/Api`. Spatie Laravel Data classes validate and carry mutation inputs, controllers enforce policies/gates, and Actions implement individual operations with transactions where needed. ListRequest validates catalog query filters. Services hold prediction calculations, reporting and provider integrations; Jobs run background workflows. See [Architecture](docs/ARCHITECTURE.md#actions-and-typed-input) and [Development](docs/DEVELOPMENT.md).

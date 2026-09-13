@@ -9,7 +9,7 @@ class UpdateProviderAction
 {
     public function execute(Provider $provider, ProviderData $data): Provider
     {
-        $provider->update($data->attributes());
+        $provider->update($data->toArray());
 
         return $provider;
     }

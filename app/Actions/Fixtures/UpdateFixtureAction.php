@@ -9,7 +9,7 @@ class UpdateFixtureAction
 {
     public function execute(Fixture $fixture, UpdateFixtureData $data): Fixture
     {
-        $fixture->update($data->attributes());
+        $fixture->update($data->toArray());
 
         return $fixture;
     }

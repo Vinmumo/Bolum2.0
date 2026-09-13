@@ -21,7 +21,7 @@ class RequestPredictionAction
 
     public function execute(Company $company, Fixture $fixture, User $user, RequestPredictionData $data): Prediction
     {
-        $key = $data->idempotencyKey;
+        $key = $data->idempotency_key;
 
         return DB::transaction(function () use ($company, $fixture, $user, $key) {
             // Serialize requests per company; the unique constraint is the final safeguard.

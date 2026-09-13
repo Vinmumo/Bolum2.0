@@ -14,7 +14,7 @@ class RecordFixtureResultAction
             $fixture = Fixture::lockForUpdate()->findOrFail($fixture->id);
             abort_if($fixture->kickoff_at->isFuture(), 409, 'A future fixture cannot have a final result.');
             abort_if(in_array($fixture->status, ['cancelled', 'postponed']), 409, 'This fixture cannot be finalized in its current state.');
-            $fixture->update([...$data->attributes(), 'status' => 'finished', 'is_finished' => true, 'result_recorded_at' => now()]);
+            $fixture->update([...$data->toArray(), 'status' => 'finished', 'is_finished' => true, 'result_recorded_at' => now()]);
 
             return $fixture;
         }, 3);

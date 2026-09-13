@@ -7,8 +7,6 @@ use App\Actions\Profile\UpdateProfileAction;
 use App\Data\ChangePasswordData;
 use App\Data\UpdateProfileData;
 use App\Http\Controllers\Controller;
-use App\Http\Requests\ChangePasswordRequest;
-use App\Http\Requests\UpdateProfileRequest;
 use App\Http\Resources\UserResource;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -20,14 +18,14 @@ class ProfileController extends Controller
         return new UserResource($request->user());
     }
 
-    public function update(UpdateProfileRequest $request, UpdateProfileAction $action)
+    public function update(Request $request, UpdateProfileAction $action)
     {
-        return new UserResource($action->execute($request->user(), UpdateProfileData::fromValidated($request->validated())));
+        return new UserResource($action->execute($request->user(), UpdateProfileData::from($request)));
     }
 
-    public function password(ChangePasswordRequest $request, ChangePasswordAction $action)
+    public function password(Request $request, ChangePasswordAction $action)
     {
-        $action->execute($request->user(), ChangePasswordData::fromValidated($request->validated()));
+        $action->execute($request->user(), ChangePasswordData::from($request));
         if ($request->hasSession()) {
             Auth::guard('web')->logout();
             $request->session()->invalidate();

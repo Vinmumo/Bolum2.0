@@ -9,7 +9,7 @@ class UpdateProfileAction
 {
     public function execute(User $user, UpdateProfileData $data): User
     {
-        $user->forceFill($data->attributes())->save();
+        $user->forceFill($data->toArray())->save();
 
         return $user;
     }

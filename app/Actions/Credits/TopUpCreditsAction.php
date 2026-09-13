@@ -13,7 +13,7 @@ class TopUpCreditsAction
     public function execute(Company $company, User $user, TopUpCreditsData $data): CreditEntry
     {
         $amount = $data->amount;
-        $key = $data->idempotencyKey;
+        $key = $data->idempotency_key;
 
         return DB::transaction(function () use ($company, $user, $amount, $key) {
             $company = Company::lockForUpdate()->findOrFail($company->id);

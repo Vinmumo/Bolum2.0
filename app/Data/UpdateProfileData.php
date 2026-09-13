@@ -2,18 +2,21 @@
 
 namespace App\Data;
 
-final readonly class UpdateProfileData
+use Illuminate\Validation\Rule;
+use Spatie\LaravelData\Data;
+
+class UpdateProfileData extends Data
 {
-    public function __construct(public string $name, public string $avatar) {}
+    public function __construct(
+        public string $name,
+        public string $avatar,
+    ) {}
 
-    /** Build only from input already accepted by a Form Request. */
-    public static function fromValidated(array $data): self
+    public static function rules(): array
     {
-        return new self($data['name'], $data['avatar']);
-    }
-
-    public function attributes(): array
-    {
-        return ['name' => $this->name, 'avatar' => $this->avatar];
+        return [
+            'name' => ['required', 'string', 'max:100'],
+            'avatar' => ['required', Rule::in(['football', 'captain', 'keeper', 'trophy', 'stadium', 'lightning'])],
+        ];
     }
 }

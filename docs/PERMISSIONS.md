@@ -21,9 +21,9 @@ An account can occupy multiple columns. The local `admin@bolum.test` account is 
 - `CompanyMember::handle()`: verifies a relationship between the current user and the company in the URL; otherwise 403.
 - `CompanyPolicy::generate()`: requires membership. `CompanyPolicy::topUp()`: also requires pivot role `owner`.
 - `PredictionPolicy::view()`: verifies membership in the prediction's company. Scoped route binding prevents resolving another company's prediction through the current company URL.
-- `manage-catalog` gate in `AppServiceProvider::boot()`: checks the trusted `users.is_admin` flag. Catalog/fixture Form Requests and controller/route gates enforce it on the server.
+- `manage-catalog` gate in `AppServiceProvider::boot()`: checks the trusted `users.is_admin` flag. Catalog/fixture controller and route gates enforce it on the server.
 - `Api/ProfileController`: passes `$request->user()` to profile Actions; the client cannot choose another user ID. `ChangePasswordAction` verifies the current password and revokes tokens/database sessions.
-- Form Requests and route middleware authorize incoming HTTP calls before an Action runs. Actions accept trusted model/user context and typed Data; constructing a DTO does not grant a permission.
+- Controllers and route middleware authorize incoming HTTP calls before Spatie Data validation and before an Action runs. Actions accept trusted model/user context and typed Data; constructing a DTO does not grant a permission.
 
 These checks are separate from field validation and rate limiting. Removing a hidden button or changing an ID in Postman does not bypass them. A valid token issued with `*` abilities does not grant admin or company membership: route policies still apply. Tokens do not currently expose a granular selectable ability-management feature.
 

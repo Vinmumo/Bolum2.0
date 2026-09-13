@@ -52,3 +52,7 @@ Passing tests demonstrate the scenarios asserted. They do not establish live pro
 ## Action refactor regressions
 
 `ActionsTest` exercises registration both through the API and browser endpoints, and forces a welcome-ledger failure to verify the shared Action rolls back the user, company and membership together. It also verifies DTO mapping preserves explicit false and zero values, retains omitted update fields, and rejects explicit null where the HTTP contract forbids it. Existing prediction tests call `RequestPredictionAction` directly for transaction/evaluation setup, while HTTP and browser tests continue to exercise the public routes.
+
+## Data validation regressions
+
+`DataValidationTest` checks the Spatie HTTP boundary and partial-update semantics: confirmation errors cannot create accounts/credits, forbidden writes stay 403 even with invalid input, team uniqueness is scoped to a league, changing a fixture league checks existing teams, optional false is preserved while explicit null is rejected, and body fields cannot override idempotency headers. Existing profile, fixture, credit, prediction and browser tests continue to exercise the same API contracts.

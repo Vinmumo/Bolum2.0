@@ -8,11 +8,11 @@ use App\Actions\Fixtures\UpdateFixtureAction;
 use App\Data\CreateFixtureData;
 use App\Data\UpdateFixtureData;
 use App\Http\Controllers\Controller;
-use App\Http\Requests\FixtureRequest;
 use App\Http\Requests\ListRequest;
 use App\Http\Resources\FixtureResource;
 use App\Models\Fixture;
 use App\Services\MatchHistory;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 
 class FixtureController extends Controller
@@ -29,14 +29,17 @@ class FixtureController extends Controller
         return (new FixtureResource($fixture->load(self::RELATIONS)))->additional(['form' => $history->form($fixture)]);
     }
 
-    public function store(FixtureRequest $request, CreateFixtureAction $action)
+    public function store(Request $request, CreateFixtureAction $action)
     {
-        return new FixtureResource($action->execute(CreateFixtureData::fromValidated($request->validated()))->load(self::RELATIONS));
+        Gate::authorize('manage-catalog');
+
+        return new FixtureResource($action->execute(CreateFixtureData::from($request))->load(self::RELATIONS));
     }
 
-    public function update(FixtureRequest $request, Fixture $fixture, UpdateFixtureAction $action)
+    public function update(Request $request, Fixture $fixture, UpdateFixtureAction $action)
     {
-        $fixture = $action->execute($fixture, UpdateFixtureData::fromValidated($request->validated()));
+        Gate::authorize('manage-catalog');
+        $fixture = $action->execute($fixture, UpdateFixtureData::from($request));
 
         return new FixtureResource($fixture->load(self::RELATIONS));
     }

@@ -2,13 +2,20 @@
 
 namespace App\Data;
 
-final readonly class TopUpCreditsData
-{
-    public function __construct(public int $amount, public string $idempotencyKey) {}
+use Spatie\LaravelData\Data;
 
-    /** Build only from input already accepted by a Form Request. */
-    public static function fromValidated(array $data): self
+class TopUpCreditsData extends Data
+{
+    public function __construct(
+        public int $amount,
+        public string $idempotency_key,
+    ) {}
+
+    public static function rules(): array
     {
-        return new self((int) $data['amount'], $data['idempotency_key']);
+        return [
+            'amount' => ['required', 'integer', 'between:1,10000'],
+            'idempotency_key' => ['required', 'string', 'max:100', 'regex:/^[a-zA-Z0-9_-]+$/'],
+        ];
     }
 }

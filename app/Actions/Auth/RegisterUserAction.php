@@ -17,7 +17,7 @@ class RegisterUserAction
     {
         return DB::transaction(function () use ($data) {
             $user = User::create(['name' => $data->name, 'email' => $data->email, 'password' => $data->password]);
-            $company = Company::create(['name' => $data->companyName]);
+            $company = Company::create(['name' => $data->company_name]);
             $user->companies()->attach($company, ['role' => 'owner']);
             $this->topUp->execute($company, $user, new TopUpCreditsData(10, 'welcome'));
 

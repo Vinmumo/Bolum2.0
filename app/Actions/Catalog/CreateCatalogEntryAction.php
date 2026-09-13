@@ -14,9 +14,9 @@ class CreateCatalogEntryAction
     public function execute(CreateLeagueData|CreateTeamData|ProviderData $data): League|Team|Provider
     {
         return match (true) {
-            $data instanceof CreateLeagueData => League::create($data->attributes()),
-            $data instanceof CreateTeamData => Team::create($data->attributes()),
-            $data instanceof ProviderData => Provider::create($data->attributes()),
+            $data instanceof CreateLeagueData => League::create($data->toArray()),
+            $data instanceof CreateTeamData => Team::create($data->toArray()),
+            $data instanceof ProviderData => Provider::create($data->toArray()),
         };
     }
 }

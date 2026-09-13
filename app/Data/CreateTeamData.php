@@ -2,18 +2,22 @@
 
 namespace App\Data;
 
-final readonly class CreateTeamData
+use Illuminate\Validation\Rule;
+use Spatie\LaravelData\Data;
+use Spatie\LaravelData\Support\Validation\ValidationContext;
+
+class CreateTeamData extends Data
 {
-    public function __construct(public int $leagueId, public string $name) {}
+    public function __construct(
+        public int $league_id,
+        public string $name,
+    ) {}
 
-    /** Build only from input already accepted by a Form Request. */
-    public static function fromValidated(array $data): self
+    public static function rules(ValidationContext $context): array
     {
-        return new self((int) $data['league_id'], $data['name']);
-    }
-
-    public function attributes(): array
-    {
-        return ['league_id' => $this->leagueId, 'name' => $this->name];
+        return [
+            'league_id' => ['required', 'integer', 'exists:leagues,id'],
+            'name' => ['required', 'string', 'max:100', Rule::unique('teams')->where('league_id', $context->payload['league_id'] ?? null)],
+        ];
     }
 }

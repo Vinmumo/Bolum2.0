@@ -2,13 +2,20 @@
 
 namespace App\Data;
 
-final readonly class LoginData
-{
-    public function __construct(public string $email, public string $password) {}
+use Spatie\LaravelData\Data;
 
-    /** Build only from input already accepted by a Form Request. */
-    public static function fromValidated(array $data): self
+class LoginData extends Data
+{
+    public function __construct(
+        public string $email,
+        public string $password,
+    ) {}
+
+    public static function rules(): array
     {
-        return new self($data['email'], $data['password']);
+        return [
+            'email' => ['required', 'email'],
+            'password' => ['required', 'string'],
+        ];
     }
 }

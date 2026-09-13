@@ -38,7 +38,7 @@ The HTTP cache key hashes URL, query and credentials. Shared caching is safe her
 
 ## Scope decisions
 
-Actions own individual application operations and their transaction boundaries. Form Requests validate HTTP input and authorize requests; typed Data objects carry those accepted values into Actions. API Resources control output, policies handle model permissions, and middleware establishes company access. Services contain reusable calculations, read reports and external integrations. Jobs retain background completion/refund state transitions. There is no repository layer duplicating Eloquent.
+Actions own individual application operations and their transaction boundaries. Spatie Data classes validate HTTP mutation input and carry typed values into Actions; controllers call Gates/Policies before constructing Data. API Resources control output, policies handle model permissions, and middleware establishes company access. Services contain reusable calculations, read reports and external integrations. Jobs retain background completion/refund state transitions. There is no repository layer duplicating Eloquent.
 
 SQLite makes setup easy. Local tests verify transaction rollback and database constraints but do not simulate simultaneous MySQL/PostgreSQL requests. MySQL CI checks engine compatibility, not a full contention workload. Production load and race testing remain follow-up work.
 
@@ -100,11 +100,12 @@ app/
                    RecordFixtureResultAction, QueueFixtureSyncAction
     Predictions/   RequestPredictionAction
     Profile/       UpdateProfileAction, ChangePasswordAction
-  Data/            Typed immutable inputs for these operations
+  Data/            Spatie Data: typed inputs and validation rules
+    Concerns/      Shared fixture cross-field validation hook
   Http/
     Controllers/Api/   JSON API request/response coordination
     Controllers/SessionController.php   Browser cookie/session lifecycle
-    Requests/      Input validation and request authorization
+    Requests/      ListRequest for read-only query filters
     Resources/     JSON contracts
   Jobs/            Queued prediction generation and fixture import
   Models/          Persistence, relationships, casts and query scopes
@@ -112,12 +113,12 @@ app/
   Services/        Calculations, reports and external-provider clients
 ```
 
-Actions expose `execute(...)`. Controllers turn `$request->validated()` into a specific `Data::fromValidated(...)` object, pass trusted model/user context separately, and return a Resource or explicit HTTP response. Transactions belong with multi-write workflows, so an Action invoked from a trusted console command receives the same atomicity as an HTTP call.
+Actions expose `execute(...)`. Controllers check Gates/Policies, construct a specific `Data::from($request)` object, pass trusted model/user context separately, and return a Resource or explicit HTTP response. Spatie validates HTTP input before constructing Data. Transactions belong with multi-write workflows so trusted non-HTTP callers get the same atomicity.
 
-The Data classes use PHP `final readonly` properties. They are plain DTOs, not Spatie Laravel Data classes, and `fromValidated()` does **not** run a second validator. Callers outside HTTP must supply valid trusted values and enforce applicable authorization. Actions still check changing domain state such as credits, kickoff time, duplicate operation keys and the current password. Internal code must not treat a DTO's existence as proof of permission.
+Data classes extend `Spatie\LaravelData\Data`, with constructor properties and `rules()`. They are not readonly classes. HTTP validation no longer requires a separate mutation Form Request or manual `fromValidated()` mapper. For untrusted arrays, call `validateAndCreate()`; default `from($array)` and direct constructors do not guarantee validation. Callers outside HTTP must enforce applicable authorization, supply required route context for update validation, and must not treat a DTO's existence as proof of permission. Actions still check changing domain state such as credits, kickoff, duplicate operation keys and the current password.
 
-`CreateFixtureData` and `UpdateFixtureData` are separate. For update fields that the API forbids being null, DTO null means omitted; `attributes()` filters only null, preserving explicit false. If a future API allows clearing a nullable field, introduce an explicit presence marker rather than treating null as omission. Provider updates use the same rule for optional `is_active`. Zero final scores remain integer zero.
+`CreateFixtureData` and `UpdateFixtureData` are separate. `Optional` explicitly marks an omitted property; Spatie's `toArray()` excludes it, preserving false and zero. Current fixture/provider fields reject explicit null. A future clearable field can use `Optional|Type|null` and a nullable rule to distinguish missing, null and a replacement value. `ValidatesFixtureTeams::withValidator()` checks changed and existing values together using the bound fixture.
 
-Browser and API registration both call `RegisterUserAction`; it creates the user, owner membership and welcome credit ledger within one transaction. The browser controller establishes the cookie session, while the API controller issues a token. `UserResource` and `AuthSessionResource` preserve the existing JSON shape. Password changes pass through `ChangePasswordRequest` to `ChangePasswordAction`; the Action verifies the current password and revokes stored access, then the controller invalidates the current HTTP session.
+Browser and API registration both call `RegisterUserAction`; it creates the user, owner membership and welcome credit ledger within one transaction. The browser controller establishes the cookie session, while the API controller issues a token. `UserResource` and `AuthSessionResource` preserve the existing JSON shape. Password changes are validated by `ChangePasswordData` and passed to `ChangePasswordAction`; the Action verifies the current password and revokes stored access, then the controller invalidates the current HTTP session.
 
 Pure prediction mathematics and external-provider adapters remain Services. The `GeneratePrediction` job preserves its serialized company/prediction IDs and guarded terminal transitions. This separation changes PHP class locations and callers, not API URLs, database schema, membership rules or response fields.

@@ -8,12 +8,13 @@ use App\Data\CreateLeagueData;
 use App\Data\CreateTeamData;
 use App\Data\ProviderData;
 use App\Http\Controllers\Controller;
-use App\Http\Requests\CatalogRequest;
 use App\Http\Requests\ListRequest;
 use App\Http\Resources\CatalogResource;
 use App\Models\League;
 use App\Models\Provider;
 use App\Models\Team;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 
 class CatalogController extends Controller
 {
@@ -31,20 +32,22 @@ class CatalogController extends Controller
         return CatalogResource::collection($model::query()->when($model === Team::class && $request->filled('league_id'), fn ($q) => $q->where('league_id', $request->integer('league_id')))->orderBy('id')->paginate($request->integer('per_page', 15)));
     }
 
-    public function store(CatalogRequest $request, CreateCatalogEntryAction $action)
+    public function store(Request $request, CreateCatalogEntryAction $action)
     {
+        Gate::authorize('manage-catalog');
         $data = match ($request->route()->defaults['catalog']) {
-            'leagues' => CreateLeagueData::fromValidated($request->validated()),
-            'teams' => CreateTeamData::fromValidated($request->validated()),
-            'providers' => ProviderData::fromValidated($request->validated()),
+            'leagues' => CreateLeagueData::from($request),
+            'teams' => CreateTeamData::from($request),
+            'providers' => ProviderData::from($request),
         };
 
         return new CatalogResource($action->execute($data));
     }
 
-    public function update(CatalogRequest $request, Provider $provider, UpdateProviderAction $action)
+    public function update(Request $request, Provider $provider, UpdateProviderAction $action)
     {
-        $provider = $action->execute($provider, ProviderData::fromValidated($request->validated()));
+        Gate::authorize('manage-catalog');
+        $provider = $action->execute($provider, ProviderData::from($request));
 
         return new CatalogResource($provider);
     }

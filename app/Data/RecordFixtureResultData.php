@@ -2,18 +2,20 @@
 
 namespace App\Data;
 
-final readonly class RecordFixtureResultData
+use Spatie\LaravelData\Data;
+
+class RecordFixtureResultData extends Data
 {
-    public function __construct(public int $homeGoals, public int $awayGoals) {}
+    public function __construct(
+        public int $home_goals,
+        public int $away_goals,
+    ) {}
 
-    /** Build only from input already accepted by a Form Request. */
-    public static function fromValidated(array $data): self
+    public static function rules(): array
     {
-        return new self((int) $data['home_goals'], (int) $data['away_goals']);
-    }
-
-    public function attributes(): array
-    {
-        return ['home_goals' => $this->homeGoals, 'away_goals' => $this->awayGoals];
+        return [
+            'home_goals' => ['required', 'integer', 'between:0,100'],
+            'away_goals' => ['required', 'integer', 'between:0,100'],
+        ];
     }
 }

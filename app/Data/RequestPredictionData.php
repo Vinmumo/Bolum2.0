@@ -2,13 +2,18 @@
 
 namespace App\Data;
 
-final readonly class RequestPredictionData
-{
-    public function __construct(public string $idempotencyKey) {}
+use Spatie\LaravelData\Data;
 
-    /** Build only from input already accepted by a Form Request. */
-    public static function fromValidated(array $data): self
+class RequestPredictionData extends Data
+{
+    public function __construct(
+        public string $idempotency_key,
+    ) {}
+
+    public static function rules(): array
     {
-        return new self($data['idempotency_key']);
+        return [
+            'idempotency_key' => ['required', 'string', 'max:100', 'regex:/^[a-zA-Z0-9_-]+$/'],
+        ];
     }
 }

@@ -3,18 +3,17 @@
 namespace App\Http\Controllers;
 
 use App\Actions\Auth\RegisterUserAction;
+use App\Data\LoginData;
 use App\Data\RegisterUserData;
-use App\Http\Requests\LoginRequest;
-use App\Http\Requests\RegisterRequest;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
 
 class SessionController extends Controller
 {
-    public function store(LoginRequest $request)
+    public function store(Request $request)
     {
-        $credentials = $request->validated();
+        $credentials = LoginData::from($request)->toArray();
         if (! Auth::attempt($credentials)) {
             throw ValidationException::withMessages(['email' => ['The supplied credentials are incorrect.']]);
         }
@@ -23,9 +22,9 @@ class SessionController extends Controller
         return response()->json(['message' => 'Signed in.', 'csrf_token' => csrf_token()]);
     }
 
-    public function register(RegisterRequest $request, RegisterUserAction $action)
+    public function register(Request $request, RegisterUserAction $action)
     {
-        $user = $action->execute(RegisterUserData::fromValidated($request->validated()));
+        $user = $action->execute(RegisterUserData::from($request));
         Auth::login($user);
         $request->session()->regenerate();
 

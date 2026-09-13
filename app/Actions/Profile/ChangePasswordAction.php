@@ -15,7 +15,7 @@ class ChangePasswordAction
     {
         DB::transaction(function () use ($user, $data) {
             $user = User::lockForUpdate()->findOrFail($user->id);
-            if (! Hash::check($data->currentPassword, $user->password)) {
+            if (! Hash::check($data->current_password, $user->password)) {
                 throw ValidationException::withMessages(['current_password' => ['Your current password is incorrect.']]);
             }
             $user->forceFill(['password' => $data->password, 'remember_token' => Str::random(60)])->save();

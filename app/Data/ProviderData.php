@@ -2,18 +2,26 @@
 
 namespace App\Data;
 
-final readonly class ProviderData
+use Illuminate\Validation\Rule;
+use Spatie\LaravelData\Data;
+use Spatie\LaravelData\Optional;
+
+class ProviderData extends Data
 {
-    public function __construct(public string $name, public string $driver, public float $weight, public ?bool $isActive = null) {}
+    public function __construct(
+        public string $name,
+        public string $driver,
+        public float $weight,
+        public Optional|bool $is_active = new Optional,
+    ) {}
 
-    /** Build only from input already accepted by a Form Request. */
-    public static function fromValidated(array $data): self
+    public static function rules(): array
     {
-        return new self($data['name'], $data['driver'], (float) $data['weight'], isset($data['is_active']) ? (bool) $data['is_active'] : null);
-    }
-
-    public function attributes(): array
-    {
-        return array_filter(['name' => $this->name, 'driver' => $this->driver, 'weight' => $this->weight, 'is_active' => $this->isActive], fn ($value) => $value !== null);
+        return [
+            'name' => ['required', 'string', 'max:100', Rule::unique('providers')->ignore(request()->route('provider'))],
+            'driver' => ['required', Rule::in(['sample', 'http', 'results'])],
+            'weight' => ['required', 'numeric', 'gt:0', 'max:100'],
+            'is_active' => ['sometimes', 'boolean'],
+        ];
     }
 }

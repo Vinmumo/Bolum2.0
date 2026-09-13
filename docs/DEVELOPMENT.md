@@ -8,18 +8,18 @@ For prediction requests, follow these components:
 
 1. `routes/api.php` selects the endpoint and middleware.
 2. Sanctum authenticates the caller, and company membership middleware establishes access to the selected company.
-3. `GeneratePredictionRequest` authorizes the action and validates the idempotency key.
-4. `Api/PredictionController` maps validated input to `RequestPredictionData` and calls `RequestPredictionAction::execute()`.
+3. `Api/PredictionController` calls the company policy and copies the authoritative idempotency header into input.
+4. `RequestPredictionData::from($request)` validates the HTTP input using Spatie, constructs typed Data, and the controller calls `RequestPredictionAction::execute()`.
 5. The Action creates the prediction and credit debit in a transaction, then dispatches the job after commit.
 6. `GeneratePrediction` calculates the result and performs a conditional state transition.
 7. `PredictionResource` defines the public response.
 
 ## Code organization
 
-- **Form Requests** validate input and authorize requests. Pass only accepted values into typed Data objects.
+- **ListRequest** remains a Form Request for read-only catalog filters. Mutation validation belongs to Data classes.
 - **Policies and gates** enforce permissions. Global catalog administration uses a gate; company and prediction actions use policies.
 - **API controllers** live in `Http/Controllers/Api`, map HTTP input to Data, delegate operations and return API Resources. `SessionController` owns the browser session lifecycle.
-- **Data objects** are immutable, typed inputs with `fromValidated()` factories; Form Requests remain the HTTP validation boundary.
+- **Data objects** extend Spatie `Data`, declare typed properties and `rules()`, and validate when constructed with `::from($request)`. Use `::validateAndCreate($array)` for untrusted arrays; constructors and default `::from($array)` do not guarantee validation.
 - **Actions** expose `execute()` for an operation and own multi-write transactions.
 - **Services** provide calculations, reports and external integrations.
 - **Jobs** execute deferred work with bounded retries and idempotent state transitions.
@@ -30,7 +30,7 @@ For prediction requests, follow these components:
 
 ## Extending the API
 
-When adding a field or endpoint, update the migration, model assignment rules and casts, request validation, typed Data mapping, Action behavior, resource representation, and relevant tests. Keep company-owned queries scoped through the selected company's relationship. Apply the same isolation to jobs, exports, and caches.
+When adding a field or endpoint, update the migration, model assignment rules and casts, Data validation rules/properties, Action behavior, resource representation, and relevant tests. Keep company-owned queries scoped through the selected company's relationship. Apply the same isolation to jobs, exports, and caches.
 
 For partial fixture updates, validate the effective values of both changed and unchanged fields. Eager load relationships serialized in list responses and keep pagination bounded. Avoid network calls inside database transactions.
 
@@ -79,3 +79,13 @@ Run browser tests with `npm ci`, `npx playwright install chromium`, and `npm run
 The new backend entry points are `FixtureImporter` (validated idempotent imports), `ProviderHttpClient` (safe telemetry and caching), `PerformanceService` (chronologically eligible evaluation), and `SessionController` (browser sessions). Preserve separate sample/external categories and never backdate production predictions to make historical metrics look populated.
 
 Use `demo:refresh` for fresh sample fixtures. It preserves existing history/results and balances, and is unavailable in production.
+
+## Spatie Data boundaries
+
+Authorization runs in controller Gates/Policies or route middleware before Data creation. For prediction and credit writes, the controller copies `Idempotency-Key` from the header into the request, replacing any body value. The Data class validates it; Actions still own replay checks and transactional writes.
+
+`Optional` marks omitted update fields. `toArray()` omits those fields and preserves explicit false and zero. Current fixture/provider optional fields reject null. A future clearable field should use `Optional|Type|null` plus a nullable rule. The shared `ValidatesFixtureTeams::withValidator()` hook checks effective team/league values using the bound fixture on updates; array validation outside HTTP needs equivalent existing-fixture context for partial updates. Provider uniqueness similarly uses the bound provider when excluding the updated record.
+
+Resources still define API responses. Input Data objects containing passwords must never be returned as responses. `ListRequest` and some report-controller validation remain for read-only filters.
+
+See [Spatie request validation](https://spatie.be/docs/laravel-data/v4/as-a-data-transfer-object/request-to-data-object) and [optional properties](https://spatie.be/docs/laravel-data/v4/as-a-data-transfer-object/optional-properties).

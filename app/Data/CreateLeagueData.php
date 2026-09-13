@@ -2,18 +2,20 @@
 
 namespace App\Data;
 
-final readonly class CreateLeagueData
+use Spatie\LaravelData\Data;
+
+class CreateLeagueData extends Data
 {
-    public function __construct(public string $name, public string $country) {}
+    public function __construct(
+        public string $name,
+        public string $country,
+    ) {}
 
-    /** Build only from input already accepted by a Form Request. */
-    public static function fromValidated(array $data): self
+    public static function rules(): array
     {
-        return new self($data['name'], $data['country']);
-    }
-
-    public function attributes(): array
-    {
-        return ['name' => $this->name, 'country' => $this->country];
+        return [
+            'name' => ['required', 'string', 'max:100', 'unique:leagues,name'],
+            'country' => ['required', 'string', 'max:100'],
+        ];
     }
 }

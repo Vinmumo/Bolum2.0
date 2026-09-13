@@ -1,16 +1,20 @@
 <?php
 
-namespace App\Services;
+namespace App\Actions\Credits;
 
+use App\Data\TopUpCreditsData;
 use App\Models\Company;
 use App\Models\CreditEntry;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 
-class CreditService
+class TopUpCreditsAction
 {
-    public function topUp(Company $company, User $user, int $amount, string $key): CreditEntry
+    public function execute(Company $company, User $user, TopUpCreditsData $data): CreditEntry
     {
+        $amount = $data->amount;
+        $key = $data->idempotencyKey;
+
         return DB::transaction(function () use ($company, $user, $amount, $key) {
             $company = Company::lockForUpdate()->findOrFail($company->id);
             $key = 'topup:'.$key;

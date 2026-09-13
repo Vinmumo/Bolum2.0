@@ -190,3 +190,7 @@ The report reuses Performance's eligibility rules. A past game without a saved p
 Match details now include an on-demand **Club guide** for imported teams. TheSportsDB supplies stadium, location, founding year and short club context, with loading/retry states and attribution. These fields do not feed prediction calculations. The server uses the public free API key by default; set `SPORTSDB_API_KEY` to your own key or blank to disable. See [Integrations](docs/INTEGRATIONS.md).
 
 Use the [Postman walkthrough and collection](docs/POSTMAN.md) to test endpoints, [Permissions](docs/PERMISSIONS.md) to understand access control, and [Testing](docs/TESTING.md) to understand the automated checks.
+
+## Backend organization
+
+API controllers live in `app/Http/Controllers/Api`. Form Requests validate inputs, immutable Data objects carry accepted values, and Actions implement individual operations with transactions where needed. Services hold prediction calculations, reporting and provider integrations; Jobs run background workflows. See [Architecture](docs/ARCHITECTURE.md#actions-and-typed-input) and [Development](docs/DEVELOPMENT.md).

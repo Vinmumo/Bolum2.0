@@ -9,17 +9,19 @@ For prediction requests, follow these components:
 1. `routes/api.php` selects the endpoint and middleware.
 2. Sanctum authenticates the caller, and company membership middleware establishes access to the selected company.
 3. `GeneratePredictionRequest` authorizes the action and validates the idempotency key.
-4. `PredictionController` delegates to `PredictionService`.
-5. The service creates the prediction and credit debit in a transaction, then dispatches the job after commit.
+4. `Api/PredictionController` maps validated input to `RequestPredictionData` and calls `RequestPredictionAction::execute()`.
+5. The Action creates the prediction and credit debit in a transaction, then dispatches the job after commit.
 6. `GeneratePrediction` calculates the result and performs a conditional state transition.
 7. `PredictionResource` defines the public response.
 
 ## Code organization
 
-- **Form Requests** validate input and authorize requests. Pass validated data into models or services.
+- **Form Requests** validate input and authorize requests. Pass only accepted values into typed Data objects.
 - **Policies and gates** enforce permissions. Global catalog administration uses a gate; company and prediction actions use policies.
-- **Controllers** delegate workflows and return API Resources.
-- **Services** coordinate business operations and transaction boundaries.
+- **API controllers** live in `Http/Controllers/Api`, map HTTP input to Data, delegate operations and return API Resources. `SessionController` owns the browser session lifecycle.
+- **Data objects** are immutable, typed inputs with `fromValidated()` factories; Form Requests remain the HTTP validation boundary.
+- **Actions** expose `execute()` for an operation and own multi-write transactions.
+- **Services** provide calculations, reports and external integrations.
 - **Jobs** execute deferred work with bounded retries and idempotent state transitions.
 - **API Resources** control serialized fields and relationships.
 - **Factories and seeders** provide test records and local sample data.
@@ -28,7 +30,7 @@ For prediction requests, follow these components:
 
 ## Extending the API
 
-When adding a field or endpoint, update the migration, model assignment rules and casts, request validation, resource representation, and relevant tests. Keep company-owned queries scoped through the selected company's relationship. Apply the same isolation to jobs, exports, and caches.
+When adding a field or endpoint, update the migration, model assignment rules and casts, request validation, typed Data mapping, Action behavior, resource representation, and relevant tests. Keep company-owned queries scoped through the selected company's relationship. Apply the same isolation to jobs, exports, and caches.
 
 For partial fixture updates, validate the effective values of both changed and unchanged fields. Eager load relationships serialized in list responses and keep pagination bounded. Avoid network calls inside database transactions.
 

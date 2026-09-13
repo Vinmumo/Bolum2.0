@@ -1,7 +1,13 @@
 <?php
 
-namespace App\Http\Controllers;
+namespace App\Http\Controllers\Api;
 
+use App\Actions\Fixtures\CreateFixtureAction;
+use App\Actions\Fixtures\DeleteFixtureAction;
+use App\Actions\Fixtures\UpdateFixtureAction;
+use App\Data\CreateFixtureData;
+use App\Data\UpdateFixtureData;
+use App\Http\Controllers\Controller;
 use App\Http\Requests\FixtureRequest;
 use App\Http\Requests\ListRequest;
 use App\Http\Resources\FixtureResource;
@@ -23,23 +29,22 @@ class FixtureController extends Controller
         return (new FixtureResource($fixture->load(self::RELATIONS)))->additional(['form' => $history->form($fixture)]);
     }
 
-    public function store(FixtureRequest $request)
+    public function store(FixtureRequest $request, CreateFixtureAction $action)
     {
-        return new FixtureResource(Fixture::create($request->validated())->load(self::RELATIONS));
+        return new FixtureResource($action->execute(CreateFixtureData::fromValidated($request->validated()))->load(self::RELATIONS));
     }
 
-    public function update(FixtureRequest $request, Fixture $fixture)
+    public function update(FixtureRequest $request, Fixture $fixture, UpdateFixtureAction $action)
     {
-        $fixture->update($request->validated());
+        $fixture = $action->execute($fixture, UpdateFixtureData::fromValidated($request->validated()));
 
         return new FixtureResource($fixture->load(self::RELATIONS));
     }
 
-    public function destroy(Fixture $fixture)
+    public function destroy(Fixture $fixture, DeleteFixtureAction $action)
     {
         Gate::authorize('manage-catalog');
-        abort_if($fixture->predictions()->exists(), 409, 'Fixtures with prediction history cannot be deleted.');
-        $fixture->delete();
+        $action->execute($fixture);
 
         return response()->noContent();
     }

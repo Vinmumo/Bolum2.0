@@ -1,23 +1,23 @@
 <?php
 
-namespace App\Http\Controllers;
+namespace App\Http\Controllers\Api;
 
+use App\Actions\Predictions\RequestPredictionAction;
+use App\Data\RequestPredictionData;
+use App\Http\Controllers\Controller;
 use App\Http\Requests\GeneratePredictionRequest;
 use App\Http\Requests\ListRequest;
 use App\Http\Resources\PredictionResource;
 use App\Models\Company;
 use App\Models\Fixture;
 use App\Models\Prediction;
-use App\Services\PredictionService;
 use Illuminate\Support\Facades\Gate;
 
 class PredictionController extends Controller
 {
-    public function __construct(private PredictionService $service) {}
-
-    public function store(GeneratePredictionRequest $request, Company $company, Fixture $fixture)
+    public function store(GeneratePredictionRequest $request, Company $company, Fixture $fixture, RequestPredictionAction $action)
     {
-        $prediction = $this->service->request($company, $fixture, $request->user(), $request->validated('idempotency_key'));
+        $prediction = $action->execute($company, $fixture, $request->user(), RequestPredictionData::fromValidated($request->validated()));
 
         return (new PredictionResource($prediction))->response()->setStatusCode($prediction->wasRecentlyCreated ? 202 : 200);
     }

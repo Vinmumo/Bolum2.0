@@ -1,8 +1,9 @@
 <?php
 
-namespace App\Http\Controllers;
+namespace App\Http\Controllers\Api;
 
 use App\Exceptions\ProviderUnavailable;
+use App\Http\Controllers\Controller;
 use App\Models\League;
 use App\Services\StandingsService;
 use Illuminate\Contracts\Cache\LockTimeoutException;

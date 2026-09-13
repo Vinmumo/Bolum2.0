@@ -2,13 +2,14 @@
 
 namespace Tests\Feature;
 
+use App\Actions\Predictions\RequestPredictionAction;
+use App\Data\RequestPredictionData;
 use App\Jobs\GeneratePrediction;
 use App\Models\Company;
 use App\Models\Fixture;
 use App\Models\Prediction;
 use App\Models\User;
 use App\Services\PredictionCalculator;
-use App\Services\PredictionService;
 use App\Services\Providers\HttpFootballProvider;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -36,7 +37,7 @@ class AnalyticsTest extends TestCase
 
     private function predict(Fixture $fixture, string $key = 'one'): Prediction
     {
-        $prediction = app(PredictionService::class)->request($this->company, $fixture, $this->user, $key);
+        $prediction = app(RequestPredictionAction::class)->execute($this->company, $fixture, $this->user, new RequestPredictionData($key));
         (new GeneratePrediction($this->company->id, $prediction->id))->handle(app(PredictionCalculator::class));
 
         return $prediction->fresh();

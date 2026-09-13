@@ -8,7 +8,7 @@ Users belong to companies through a pivot with an owner/member role. Prediction 
 
 ## Request a prediction
 
-`PredictionService` locks the company, resolves a previous idempotency key, verifies the upcoming fixture and balance, snapshots active providers and fixture inputs, inserts a pending prediction, decrements the balance, and appends a debit. A failure rolls back all these writes. The company/key unique constraint remains the final database safeguard against duplicate requests.
+`RequestPredictionAction` locks the company, resolves a previous idempotency key, verifies the upcoming fixture and balance, snapshots active providers and fixture inputs, inserts a pending prediction, decrements the balance, and appends a debit. A failure rolls back all these writes. The company/key unique constraint remains the final database safeguard against duplicate requests.
 
 Idempotency keys are company-wide and tied to the requesting user and fixture. Replays never depend on current provider settings. A changed user or fixture returns a conflict. New requests use new keys and create a history rather than overwriting a previous result.
 
@@ -38,7 +38,7 @@ The HTTP cache key hashes URL, query and credentials. Shared caching is safe her
 
 ## Scope decisions
 
-A single explicit service orchestrates each multi-write workflow; there is no repository layer duplicating Eloquent. Form Requests handle validation and request authorization, API Resources control output, policies handle model permissions, and middleware establishes company access.
+Actions own individual application operations and their transaction boundaries. Form Requests validate HTTP input and authorize requests; typed Data objects carry those accepted values into Actions. API Resources control output, policies handle model permissions, and middleware establishes company access. Services contain reusable calculations, read reports and external integrations. Jobs retain background completion/refund state transitions. There is no repository layer duplicating Eloquent.
 
 SQLite makes setup easy. Local tests verify transaction rollback and database constraints but do not simulate simultaneous MySQL/PostgreSQL requests. MySQL CI checks engine compatibility, not a full contention workload. Production load and race testing remain follow-up work.
 
@@ -68,7 +68,7 @@ This is prospective forecast evaluation, not historical feature reconstruction. 
 
 `MatchHistory` centralizes the chronological rules shared by form and model inputs. Eligible matches have imported final scores in the same league, kickoff within 365 days, and result observation/update at or before the cutoff. Past detail views use their kickoff as the cutoff. A past result imported today cannot be used to claim a forecast could have known it earlier. Mutable fixture rows are not a historical feature store; corrections can remove an entry from a past form view. Already accepted forecast snapshots are unaffected.
 
-`ResultsFootballProvider` loads at most 1,000 eligible rows, requires minimum league/team samples, and produces deterministic inputs using recency weights and smoothed venue rates. `PredictionService` freezes these database-derived inputs before debiting within its transaction. The bounded database calculation performs no network I/O while the company is locked. The job later consumes only frozen inputs. HTTP drivers still make their calls outside that transaction. A provider failure never silently substitutes synthetic inputs.
+`ResultsFootballProvider` loads at most 1,000 eligible rows, requires minimum league/team samples, and produces deterministic inputs using recency weights and smoothed venue rates. `RequestPredictionAction` freezes these database-derived inputs before debiting within its transaction. The bounded database calculation performs no network I/O while the company is locked. The job later consumes only frozen inputs. HTTP drivers still make their calls outside that transaction. A provider failure never silently substitutes synthetic inputs.
 
 `StandingsService` validates the official TOTAL table, caches it for ten minutes, and uses a shared cache lock to avoid duplicate upstream calls on concurrent cache misses. Public reads have an IP rate limit. Source errors are safe/recoverable, and telemetry uses the existing sanitized logger. Historical-season tables may omit earlier administrative deductions; current tables preserve upstream points. Standings are display context and do not enter the forecast model, avoiding accidental use of today's table for earlier predictions.
 
@@ -87,3 +87,37 @@ Administrators see an Operations workspace with a distinct summary and the exist
 `ForecastEligibility` centralizes the identity, timestamp, category and valid-probability rules shared by aggregate Performance and the gameweek track record. `TrackRecordService` starts from all fixtures in one selected round, then scans only that workspace's completed predictions in descending ID order to select the latest eligible forecast per fixture. This preserves missing-forecast rows and distinguishes coverage from accuracy. Reports do not synthesize historical predictions. Administrative visibility does not bypass workspace membership.
 
 The match browser uses catalog-derived round metadata and a 300 ms search debounce. Input changes immediately invalidate previous request IDs, so late responses cannot overwrite the current search. Disabled league selects are explicitly serialized; HTML FormData normally omits disabled controls. Imported leagues take priority over local demo leagues in the selector. Sidebar expansion is a local presentation preference only, never an authorization control.
+
+## Actions and typed input
+
+```text
+app/
+  Actions/
+    Auth/          RegisterUserAction, AuthenticateUserAction, IssueApiTokenAction, RevokeApiTokenAction
+    Catalog/       CreateCatalogEntryAction, UpdateProviderAction
+    Credits/       TopUpCreditsAction
+    Fixtures/      CreateFixtureAction, UpdateFixtureAction, DeleteFixtureAction,
+                   RecordFixtureResultAction, QueueFixtureSyncAction
+    Predictions/   RequestPredictionAction
+    Profile/       UpdateProfileAction, ChangePasswordAction
+  Data/            Typed immutable inputs for these operations
+  Http/
+    Controllers/Api/   JSON API request/response coordination
+    Controllers/SessionController.php   Browser cookie/session lifecycle
+    Requests/      Input validation and request authorization
+    Resources/     JSON contracts
+  Jobs/            Queued prediction generation and fixture import
+  Models/          Persistence, relationships, casts and query scopes
+  Policies/        Model/workspace permissions
+  Services/        Calculations, reports and external-provider clients
+```
+
+Actions expose `execute(...)`. Controllers turn `$request->validated()` into a specific `Data::fromValidated(...)` object, pass trusted model/user context separately, and return a Resource or explicit HTTP response. Transactions belong with multi-write workflows, so an Action invoked from a trusted console command receives the same atomicity as an HTTP call.
+
+The Data classes use PHP `final readonly` properties. They are plain DTOs, not Spatie Laravel Data classes, and `fromValidated()` does **not** run a second validator. Callers outside HTTP must supply valid trusted values and enforce applicable authorization. Actions still check changing domain state such as credits, kickoff time, duplicate operation keys and the current password. Internal code must not treat a DTO's existence as proof of permission.
+
+`CreateFixtureData` and `UpdateFixtureData` are separate. For update fields that the API forbids being null, DTO null means omitted; `attributes()` filters only null, preserving explicit false. If a future API allows clearing a nullable field, introduce an explicit presence marker rather than treating null as omission. Provider updates use the same rule for optional `is_active`. Zero final scores remain integer zero.
+
+Browser and API registration both call `RegisterUserAction`; it creates the user, owner membership and welcome credit ledger within one transaction. The browser controller establishes the cookie session, while the API controller issues a token. `UserResource` and `AuthSessionResource` preserve the existing JSON shape. Password changes pass through `ChangePasswordRequest` to `ChangePasswordAction`; the Action verifies the current password and revokes stored access, then the controller invalidates the current HTTP session.
+
+Pure prediction mathematics and external-provider adapters remain Services. The `GeneratePrediction` job preserves its serialized company/prediction IDs and guarded terminal transitions. This separation changes PHP class locations and callers, not API URLs, database schema, membership rules or response fields.

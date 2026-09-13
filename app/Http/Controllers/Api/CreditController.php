@@ -1,12 +1,14 @@
 <?php
 
-namespace App\Http\Controllers;
+namespace App\Http\Controllers\Api;
 
+use App\Actions\Credits\TopUpCreditsAction;
+use App\Data\TopUpCreditsData;
+use App\Http\Controllers\Controller;
 use App\Http\Requests\ListRequest;
 use App\Http\Requests\TopUpRequest;
 use App\Http\Resources\CreditEntryResource;
 use App\Models\Company;
-use App\Services\CreditService;
 
 class CreditController extends Controller
 {
@@ -15,8 +17,8 @@ class CreditController extends Controller
         return CreditEntryResource::collection($company->creditEntries()->latest('id')->paginate($request->integer('per_page', 15)))->additional(['balance' => $company->credits, 'unit' => 'demo_credit']);
     }
 
-    public function store(TopUpRequest $request, Company $company, CreditService $credits)
+    public function store(TopUpRequest $request, Company $company, TopUpCreditsAction $action)
     {
-        return new CreditEntryResource($credits->topUp($company, $request->user(), $request->integer('amount'), $request->validated('idempotency_key')));
+        return new CreditEntryResource($action->execute($company, $request->user(), TopUpCreditsData::fromValidated($request->validated())));
     }
 }

@@ -2,13 +2,14 @@
 
 namespace Database\Seeders;
 
+use App\Actions\Credits\TopUpCreditsAction;
+use App\Data\TopUpCreditsData;
 use App\Models\Company;
 use App\Models\Fixture;
 use App\Models\League;
 use App\Models\Provider;
 use App\Models\Team;
 use App\Models\User;
-use App\Services\CreditService;
 use Illuminate\Database\Seeder;
 
 class DatabaseSeeder extends Seeder
@@ -25,7 +26,7 @@ class DatabaseSeeder extends Seeder
         $company->users()->syncWithoutDetaching([$admin->id => ['role' => 'owner'], $member->id => ['role' => 'member']]);
         if (! $company->creditEntries()->exists()) {
             $company->forceFill(['credits' => 0])->save();
-            app(CreditService::class)->topUp($company, $admin, 10, 'welcome');
+            app(TopUpCreditsAction::class)->execute($company, $admin, new TopUpCreditsData(10, 'welcome'));
         }
         $other = Company::firstOrCreate(['name' => 'Rival Analytics']);
         $league = League::firstOrCreate(['name' => 'Demo Premier League'], ['country' => 'England']);

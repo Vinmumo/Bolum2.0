@@ -1,7 +1,8 @@
 <?php
 
-namespace App\Services;
+namespace App\Actions\Predictions;
 
+use App\Data\RequestPredictionData;
 use App\Enums\PredictionStatus;
 use App\Exceptions\ProviderUnavailable;
 use App\Jobs\GeneratePrediction;
@@ -14,12 +15,14 @@ use App\Services\Providers\ResultsFootballProvider;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 
-class PredictionService
+class RequestPredictionAction
 {
     public function __construct(private ResultsFootballProvider $results) {}
 
-    public function request(Company $company, Fixture $fixture, User $user, string $key): Prediction
+    public function execute(Company $company, Fixture $fixture, User $user, RequestPredictionData $data): Prediction
     {
+        $key = $data->idempotencyKey;
+
         return DB::transaction(function () use ($company, $fixture, $user, $key) {
             // Serialize requests per company; the unique constraint is the final safeguard.
             $company = Company::lockForUpdate()->findOrFail($company->id);

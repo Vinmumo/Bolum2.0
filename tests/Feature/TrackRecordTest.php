@@ -2,11 +2,12 @@
 
 namespace Tests\Feature;
 
+use App\Actions\Predictions\RequestPredictionAction;
+use App\Data\RequestPredictionData;
 use App\Models\Company;
 use App\Models\Fixture;
 use App\Models\Prediction;
 use App\Models\User;
-use App\Services\PredictionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Laravel\Sanctum\Sanctum;
@@ -33,7 +34,7 @@ class TrackRecordTest extends TestCase
 
     private function forecast(Fixture $fixture, string $key, array $probabilities, string $quality = 'external'): Prediction
     {
-        $prediction = app(PredictionService::class)->request($this->company, $fixture, $this->admin, $key);
+        $prediction = app(RequestPredictionAction::class)->execute($this->company, $fixture, $this->admin, new RequestPredictionData($key));
         $prediction->update(['status' => 'completed', 'completed_at' => now(), 'result' => ['data_quality' => $quality, 'probabilities' => $probabilities, 'most_likely_score' => ['home' => 2, 'away' => 0]]]);
 
         return $prediction;

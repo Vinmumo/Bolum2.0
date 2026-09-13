@@ -1,20 +1,20 @@
 <?php
 
-use App\Http\Controllers\AdminOverviewController;
-use App\Http\Controllers\AuthController;
-use App\Http\Controllers\CatalogController;
-use App\Http\Controllers\ClubProfileController;
-use App\Http\Controllers\CreditController;
-use App\Http\Controllers\FixtureController;
-use App\Http\Controllers\FixtureOptionsController;
-use App\Http\Controllers\FixtureResultController;
-use App\Http\Controllers\FixtureSyncController;
-use App\Http\Controllers\PerformanceController;
-use App\Http\Controllers\PredictionController;
-use App\Http\Controllers\ProfileController;
-use App\Http\Controllers\ProviderUsageController;
-use App\Http\Controllers\StandingsController;
-use App\Http\Controllers\TrackRecordController;
+use App\Http\Controllers\Api\AdminOverviewController;
+use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\CatalogController;
+use App\Http\Controllers\Api\ClubProfileController;
+use App\Http\Controllers\Api\CreditController;
+use App\Http\Controllers\Api\FixtureController;
+use App\Http\Controllers\Api\FixtureOptionsController;
+use App\Http\Controllers\Api\FixtureResultController;
+use App\Http\Controllers\Api\FixtureSyncController;
+use App\Http\Controllers\Api\PerformanceController;
+use App\Http\Controllers\Api\PredictionController;
+use App\Http\Controllers\Api\ProfileController;
+use App\Http\Controllers\Api\ProviderUsageController;
+use App\Http\Controllers\Api\StandingsController;
+use App\Http\Controllers\Api\TrackRecordController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function () {

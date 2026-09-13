@@ -48,3 +48,7 @@ It is optional if the project only promises Linux support. Bolum provides Window
 The failure happened during dependency installation, before migrations. It does not require a Composer dependency update or an index-length workaround. Do not hide it using `--ignore-platform-reqs`. Keep the Windows job small rather than repeating the full browser/database matrix there.
 
 Passing tests demonstrate the scenarios asserted. They do not establish live provider uptime, prediction profitability, complete security coverage or production-scale concurrency. A new workflow edit is not a passed remote run until Actions executes the pushed commit.
+
+## Action refactor regressions
+
+`ActionsTest` exercises registration both through the API and browser endpoints, and forces a welcome-ledger failure to verify the shared Action rolls back the user, company and membership together. It also verifies DTO mapping preserves explicit false and zero values, retains omitted update fields, and rejects explicit null where the HTTP contract forbids it. Existing prediction tests call `RequestPredictionAction` directly for transaction/evaluation setup, while HTTP and browser tests continue to exercise the public routes.

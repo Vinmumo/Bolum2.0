@@ -2,20 +2,19 @@
 
 namespace App\Http\Controllers;
 
+use App\Actions\Auth\RegisterUserAction;
+use App\Data\RegisterUserData;
+use App\Http\Requests\LoginRequest;
 use App\Http\Requests\RegisterRequest;
-use App\Models\Company;
-use App\Models\User;
-use App\Services\CreditService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class SessionController extends Controller
 {
-    public function store(Request $request)
+    public function store(LoginRequest $request)
     {
-        $credentials = $request->validate(['email' => ['required', 'email'], 'password' => ['required', 'string']]);
+        $credentials = $request->validated();
         if (! Auth::attempt($credentials)) {
             throw ValidationException::withMessages(['email' => ['The supplied credentials are incorrect.']]);
         }
@@ -24,16 +23,9 @@ class SessionController extends Controller
         return response()->json(['message' => 'Signed in.', 'csrf_token' => csrf_token()]);
     }
 
-    public function register(RegisterRequest $request)
+    public function register(RegisterRequest $request, RegisterUserAction $action)
     {
-        $user = DB::transaction(function () use ($request) {
-            $user = User::create($request->safe()->only(['name', 'email', 'password']));
-            $company = Company::create(['name' => $request->validated('company_name')]);
-            $company->users()->attach($user, ['role' => 'owner']);
-            app(CreditService::class)->topUp($company, $user, 10, 'welcome');
-
-            return $user;
-        });
+        $user = $action->execute(RegisterUserData::fromValidated($request->validated()));
         Auth::login($user);
         $request->session()->regenerate();
 

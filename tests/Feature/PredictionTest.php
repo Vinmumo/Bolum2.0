@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Actions\Predictions\RequestPredictionAction;
+use App\Data\RequestPredictionData;
 use App\Enums\PredictionStatus;
 use App\Jobs\GeneratePrediction;
 use App\Models\Company;
@@ -11,7 +13,6 @@ use App\Models\Prediction;
 use App\Models\Provider;
 use App\Models\User;
 use App\Services\PredictionCalculator;
-use App\Services\PredictionService;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -165,7 +166,7 @@ class PredictionTest extends TestCase
             $entry->idempotency_key = 'forced-collision';
         });
         try {
-            app(PredictionService::class)->request($this->company, $this->fixture, $this->member, 'rollback');
+            app(RequestPredictionAction::class)->execute($this->company, $this->fixture, $this->member, new RequestPredictionData('rollback'));
             $this->fail('Expected unique constraint violation.');
         } catch (UniqueConstraintViolationException $e) {
             $this->assertSame(10, $this->company->fresh()->credits);

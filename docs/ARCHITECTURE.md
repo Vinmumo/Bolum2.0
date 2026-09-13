@@ -71,3 +71,19 @@ This is prospective forecast evaluation, not historical feature reconstruction. 
 `ResultsFootballProvider` loads at most 1,000 eligible rows, requires minimum league/team samples, and produces deterministic inputs using recency weights and smoothed venue rates. `PredictionService` freezes these database-derived inputs before debiting within its transaction. The bounded database calculation performs no network I/O while the company is locked. The job later consumes only frozen inputs. HTTP drivers still make their calls outside that transaction. A provider failure never silently substitutes synthetic inputs.
 
 `StandingsService` validates the official TOTAL table, caches it for ten minutes, and uses a shared cache lock to avoid duplicate upstream calls on concurrent cache misses. Public reads have an IP rate limit. Source errors are safe/recoverable, and telemetry uses the existing sanitized logger. Historical-season tables may omit earlier administrative deductions; current tables preserve upstream points. Standings are display context and do not enter the forecast model, avoiding accidental use of today's table for earlier predictions.
+
+
+## Profile and administration UI
+
+The public `/profile` route serves the dashboard shell. Account data is fetched separately behind Sanctum authentication. Profile updates only accept a validated display name and preset avatar. Email changes are intentionally deferred until a verification workflow exists. The password action validates the current password against a locked user row, changes the hash and revokes tokens; the default database session store permits removing other device sessions without touching other users. Credentials and admin flags are never exposed as editable profile fields.
+
+The header avatar opens the profile; sign-out is an explicit separate control. Browser history supports the profile path and tab URLs. Inline client validation supplements server checks and associates errors with fields using `aria-invalid` and `aria-describedby`. Forms block duplicate submissions while a save is pending. Prediction loading states distinguish request submission from a queued result; they do not invent a progress percentage or claim that a worker is currently running.
+
+Administrators see an Operations workspace with a distinct summary and the existing provider/fixture controls. Its aggregate endpoint is guarded by the global catalog permission. Private company prediction detail continues to require membership. Pending and stale request counts are operational indicators, not worker heartbeat checks. Safe job recovery controls and administrative change audit trails are potential future extensions; this view does not expose arbitrary queue retry or database editing.
+
+
+## Gameweek audit and responsive filters
+
+`ForecastEligibility` centralizes the identity, timestamp, category and valid-probability rules shared by aggregate Performance and the gameweek track record. `TrackRecordService` starts from all fixtures in one selected round, then scans only that workspace's completed predictions in descending ID order to select the latest eligible forecast per fixture. This preserves missing-forecast rows and distinguishes coverage from accuracy. Reports do not synthesize historical predictions. Administrative visibility does not bypass workspace membership.
+
+The match browser uses catalog-derived round metadata and a 300 ms search debounce. Input changes immediately invalidate previous request IDs, so late responses cannot overwrite the current search. Disabled league selects are explicitly serialized; HTML FormData normally omits disabled controls. Imported leagues take priority over local demo leagues in the selector. Sidebar expansion is a local presentation preference only, never an authorization control.

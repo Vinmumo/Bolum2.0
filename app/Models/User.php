@@ -15,6 +15,8 @@ use Illuminate\Notifications\Notifiable;
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
 {
+    protected $attributes = ['avatar' => 'football', 'is_admin' => false];
+
     /** @use HasFactory<UserFactory> */
     use HasFactory, \Laravel\Sanctum\HasApiTokens, Notifiable;
 

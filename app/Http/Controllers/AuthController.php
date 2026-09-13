@@ -41,12 +41,12 @@ class AuthController extends Controller
 
     private function session(User $user): array
     {
-        return ['user' => $user->only(['id', 'name', 'email', 'is_admin']), 'companies' => $user->companies()->get(['companies.id', 'companies.name']), 'token' => $user->createToken('api', ['*'], now()->addHours(8))->plainTextToken];
+        return ['user' => $user->only(['id', 'name', 'email', 'avatar', 'created_at', 'is_admin']), 'companies' => $user->companies()->get(['companies.id', 'companies.name']), 'token' => $user->createToken('api', ['*'], now()->addHours(8))->plainTextToken];
     }
 
     public function me(Request $request)
     {
-        return response()->json(['data' => ['user' => $request->user()->only(['id', 'name', 'email', 'is_admin']), 'companies' => $request->user()->companies()->get(['companies.id', 'companies.name'])]]);
+        return response()->json(['data' => ['user' => $request->user()->only(['id', 'name', 'email', 'avatar', 'created_at', 'is_admin']), 'companies' => $request->user()->companies()->get(['companies.id', 'companies.name'])]]);
     }
 
     public function logout(Request $request)

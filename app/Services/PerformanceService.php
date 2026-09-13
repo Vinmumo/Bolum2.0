@@ -4,10 +4,11 @@ namespace App\Services;
 
 use App\Models\Company;
 use App\Models\Prediction;
-use Carbon\CarbonImmutable;
 
 class PerformanceService
 {
+    public function __construct(private ForecastEligibility $eligibility) {}
+
     public function report(Company $company, string $quality = 'external'): array
     {
         $count = 0;
@@ -26,19 +27,8 @@ class PerformanceService
             ->with('fixture')->orderByDesc('id')->chunkByIdDesc(200, function ($predictions) use (&$count, &$correct, &$brier, &$logLoss, &$recent, &$buckets, &$seen, $quality) {
                 foreach ($predictions as $p) {
                     $f = $p->fixture;
-                    $snapshot = $p->fixture_snapshot;
-                    if (! isset($snapshot['kickoff_at'], $snapshot['home_team_id'], $snapshot['away_team_id'])) {
-                        continue;
-                    }
-                    $cutoff = CarbonImmutable::parse($snapshot['kickoff_at']);
-                    if ($p->created_at >= $cutoff || $p->completed_at >= $cutoff || $snapshot['home_team_id'] != $f->home_team_id || $snapshot['away_team_id'] != $f->away_team_id) {
-                        continue;
-                    }
-                    if ($p->created_at >= $f->kickoff_at || $p->completed_at >= $f->kickoff_at || ($p->result['data_quality'] ?? 'unknown') !== $quality || isset($seen[$f->id])) {
-                        continue;
-                    }
-                    $probs = $p->result['probabilities'] ?? [];
-                    if (count($probs) !== 3 || ! isset($probs['home_win'],$probs['draw'],$probs['away_win'])) {
+                    $probs = $this->eligibility->probabilities($p, $f, $quality);
+                    if ($probs === null || isset($seen[$f->id])) {
                         continue;
                     }
                     $seen[$f->id] = true;

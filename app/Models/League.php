@@ -10,7 +10,7 @@ class League extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['source', 'external_id', 'name', 'country'];
+    protected $fillable = ['source', 'external_id', 'code', 'name', 'country'];
 
     protected function casts(): array
     {

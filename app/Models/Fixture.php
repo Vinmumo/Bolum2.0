@@ -20,6 +20,17 @@ class Fixture extends Model
         return $this->hasMany(Prediction::class);
     }
 
+    public function marketOdds(): HasMany
+    {
+        return $this->hasMany(MarketOdds::class);
+    }
+
+    /** Most recent bookmaker consensus observed before kickoff, i.e. what a pre-match forecast could be compared with. */
+    public function latestPreKickoffOdds(): ?MarketOdds
+    {
+        return $this->marketOdds()->where('observed_at', '<', $this->kickoff_at)->latest('observed_at')->latest('id')->first();
+    }
+
     public const FILTER_OPTIONS_CACHE_KEY = 'fixtures:filter-options';
 
     protected static function booted(): void

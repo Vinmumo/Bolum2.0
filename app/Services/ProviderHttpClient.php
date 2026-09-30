@@ -40,7 +40,7 @@ class ProviderHttpClient
                 if ($response->successful()) {
                     $category = 'invalid_response';
                     $retry = false;
-                    $data = $normalize($response->json());
+                    $data = $normalize($response->json(), $response);
                     Cache::put($key, $data, $ttl);
                     $this->record($source, $operation, 'success', $status, (int) ((hrtime(true) - $start) / 1e6), false, $attempt);
 

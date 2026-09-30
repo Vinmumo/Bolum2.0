@@ -7,6 +7,7 @@ use App\Data\RequestPredictionData;
 use App\Jobs\GeneratePrediction;
 use App\Models\Company;
 use App\Models\Fixture;
+use App\Models\MarketOdds;
 use App\Models\Prediction;
 use App\Models\User;
 use App\Services\PerformanceService;
@@ -76,6 +77,24 @@ class AnalyticsTest extends TestCase
         $this->assertEqualsWithDelta(2 / 3, $r->json('data.baselines.uniform.brier_score'), 1e-12);
         $this->assertEqualsWithDelta(log(3), $r->json('data.baselines.base_rate.log_loss'), 1e-12);
         $this->assertEqualsWithDelta(1 - $expected / (2 / 3), $r->json('data.brier_skill'), 1e-12);
+    }
+
+    public function test_performance_compares_bolum_with_odds_observed_before_kickoff(): void
+    {
+        $fixture = Fixture::first();
+        $prediction = $this->predict($fixture);
+        MarketOdds::create(['fixture_id' => $fixture->id, 'source' => 'the-odds-api', 'external_id' => 'e1', 'bookmakers' => 5,
+            'home_win' => 0.6, 'draw' => 0.25, 'away_win' => 0.15, 'average_margin' => 0.05, 'observed_at' => $fixture->kickoff_at->subHour()]);
+        // A snapshot taken after kickoff would leak the in-play market and must be ignored.
+        MarketOdds::create(['fixture_id' => $fixture->id, 'source' => 'the-odds-api', 'external_id' => 'e1', 'bookmakers' => 5,
+            'home_win' => 0.99, 'draw' => 0.005, 'away_win' => 0.005, 'average_margin' => 0.05, 'observed_at' => $fixture->kickoff_at->addMinutes(80)]);
+        $this->travel(5)->days();
+        $this->putJson('/api/v1/fixtures/'.$fixture->id.'/result', ['home_goals' => 2, 'away_goals' => 0])->assertOk();
+        $r = $this->getJson('/api/v1/companies/'.$this->company->id.'/performance?quality=sample')->assertOk()->assertJsonPath('data.market.count', 1);
+        $this->assertEqualsWithDelta(-log(0.6), $r->json('data.market.bookmakers.log_loss'), 1e-12);
+        $this->assertEqualsWithDelta(-log($prediction->result['probabilities']['home_win']), $r->json('data.market.bolum.log_loss'), 1e-12);
+        MarketOdds::query()->delete();
+        $this->getJson('/api/v1/companies/'.$this->company->id.'/performance?quality=sample')->assertJsonPath('data.market', null);
     }
 
     public function test_base_rate_baseline_never_sees_the_outcome_it_is_scored_against(): void

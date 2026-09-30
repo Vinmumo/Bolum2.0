@@ -98,6 +98,26 @@ For scheduled synchronization, set `FOOTBALL_SYNC_ENABLED=true`, then run the sc
 php artisan schedule:work
 ```
 
+## Bookmaker benchmark
+
+Bolum can save the bookmakers' consensus for upcoming imported fixtures from [The Odds API](https://the-odds-api.com/) and compare it with its own forecasts. Odds are a benchmark only: they never feed the model. Add your key to `.env`, then:
+
+```dotenv
+ODDS_API_KEY=your-key
+# Bookmaker regions; each region costs one credit per league per sync.
+ODDS_REGIONS=uk
+# Daily snapshot at 09:00 through the scheduler.
+ODDS_SYNC_ENABLED=true
+```
+
+```bash
+php artisan config:clear
+php artisan fixtures:sync   # stores each league's competition code, needed once
+php artisan odds:sync
+```
+
+Each bookmaker's home/draw/away prices become probabilities with that bookmaker's margin removed, then are averaged. An event is saved only when both club names match an imported fixture (ignoring suffixes such as FC and "&" versus "and") and kickoffs are within two hours; anything else is counted as unmatched rather than guessed. The sync stops when fewer than 25 credits remain for the month. Match details show the consensus observed before kickoff, and Performance compares Bolum with the bookmakers on the fixtures that have both. A daily Premier League snapshot uses about 30 of the free plan's 500 monthly credits.
+
 ## Predictions from real match results
 
 After importing fixtures and final scores, run:

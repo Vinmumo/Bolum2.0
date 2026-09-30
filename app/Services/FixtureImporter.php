@@ -122,12 +122,12 @@ class FixtureImporter
                 return $data;
             }, 60, waitForBudget: true);
 
-            return DB::transaction(function () use ($data) {
+            return DB::transaction(function () use ($data, $competition) {
                 $source = 'football-data';
                 $league = League::firstOrNew(['source' => $source, 'external_id' => (string) $data['competition']['id']]);
                 // A recent-window response can be empty; keep the stored country rather than guessing one.
                 $country = $data['matches'][0]['area']['name'] ?? ($league->country ?: 'International');
-                $league->fill(['name' => $data['competition']['name'], 'country' => mb_substr($country, 0, 100)])->save();
+                $league->fill(['code' => $competition, 'name' => $data['competition']['name'], 'country' => mb_substr($country, 0, 100)])->save();
                 // Preload existing rows and upsert only changed ones, so a sync is a handful of queries
                 // and updated_at still means "last changed" for match-history cutoffs.
                 $teams = collect();

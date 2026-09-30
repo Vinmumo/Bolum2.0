@@ -5,6 +5,8 @@ namespace Tests\Feature;
 use App\Models\Company;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Request;
+use Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful;
 use Tests\TestCase;
 
 class DashboardTest extends TestCase
@@ -24,6 +26,14 @@ class DashboardTest extends TestCase
         $this->assertDatabaseCount('personal_access_tokens', 0);
         $this->postJson('/session/logout')->assertOk();
         $this->assertGuest('web');
+    }
+
+    public function test_the_dashboard_host_is_stateful_on_any_port_but_other_sites_are_not(): void
+    {
+        $request = fn (string $url, string $referer) => tap(Request::create($url), fn ($r) => $r->headers->set('referer', $referer));
+        // `php artisan serve` falls back to 8001 when 8000 is busy; the session must still reach the API.
+        $this->assertTrue(EnsureFrontendRequestsAreStateful::fromFrontend($request('http://127.0.0.1:8001/api/v1/auth/me', 'http://127.0.0.1:8001/')));
+        $this->assertFalse(EnsureFrontendRequestsAreStateful::fromFrontend($request('http://127.0.0.1:8001/api/v1/auth/me', 'https://evil.example/')));
     }
 
     public function test_browser_registration_creates_company_owner_and_opening_ledger(): void

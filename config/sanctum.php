@@ -19,10 +19,11 @@ return [
     */
 
     'stateful' => explode(',', env('SANCTUM_STATEFUL_DOMAINS', sprintf(
-        '%s%s',
+        '%s%s%s',
         'localhost,localhost:3000,127.0.0.1,127.0.0.1:8000,::1',
         Sanctum::currentApplicationUrlWithPort(),
-        // Sanctum::currentRequestHost(),
+        // The dashboard is served by this app, so its own host (any port, e.g. 127.0.0.1:8001) is stateful.
+        Sanctum::currentRequestHost(),
     ))),
 
     /*

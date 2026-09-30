@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Exceptions\ProviderUnavailable;
 use App\Jobs\SyncFixtures;
+use App\Models\Fixture;
 use App\Models\FixtureSync;
 use App\Models\League;
 use App\Models\Team;
@@ -11,6 +12,7 @@ use App\Models\User;
 use App\Services\FixtureImporter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Laravel\Sanctum\Sanctum;
@@ -85,6 +87,48 @@ class FixtureSyncTest extends TestCase
         $this->assertSame(2, League::where('name', 'Premier League')->count());
         Sanctum::actingAs(User::factory()->create(['is_admin' => true]));
         $this->postJson('/api/v1/leagues', ['name' => 'Premier League', 'country' => 'England'])->assertUnprocessable()->assertJsonValidationErrors('name');
+    }
+
+    public function test_sync_uses_a_bounded_number_of_queries_and_skips_unchanged_rows(): void
+    {
+        config(['football.data_token' => 'secret']);
+        $data = $this->payload();
+        for ($i = 0; $i < 100; $i++) {
+            $data['matches'][] = ['id' => 1000 + $i, 'area' => ['name' => 'England'], 'utcDate' => now()->addDays(3)->toIso8601String(), 'season' => ['startDate' => '2026-08-01'], 'matchday' => 4, 'status' => 'TIMED',
+                'homeTeam' => ['id' => 10 + $i, 'name' => 'Home '.$i], 'awayTeam' => ['id' => 200 + $i, 'name' => 'Away '.$i], 'score' => ['fullTime' => ['home' => null, 'away' => null]]];
+        }
+        Http::fake(function () use (&$data) {
+            return Http::response($data);
+        });
+        $queries = 0;
+        DB::listen(function () use (&$queries) {
+            $queries++;
+        });
+        $this->assertSame(102, app(FixtureImporter::class)->run());
+        $this->assertLessThan(25, $queries);
+        $this->assertDatabaseCount('fixtures', 102);
+        $this->assertDatabaseCount('teams', 202);
+        $this->assertNotNull(Fixture::where('external_id', '101')->value('result_recorded_at'));
+
+        $before = Fixture::orderBy('id')->pluck('updated_at', 'external_id');
+        $this->travel(1)->hours();
+        Cache::flush();
+        $data['matches'][0]['utcDate'] = now()->addDays(4)->toIso8601String();
+        app(FixtureImporter::class)->run();
+        $after = Fixture::orderBy('id')->pluck('updated_at', 'external_id');
+        $this->assertNotEquals($before['100'], $after['100']);
+        $this->assertEquals($before->except('100'), $after->except('100'));
+    }
+
+    public function test_filter_options_are_cached_and_refreshed_after_changes(): void
+    {
+        $this->seed();
+        $count = count($this->getJson('/api/v1/fixtures/filter-options')->assertOk()->json('data'));
+        $fixture = Fixture::firstOrFail();
+        Fixture::create([...$fixture->only(['league_id', 'home_team_id', 'away_team_id']), 'kickoff_at' => now()->addDays(30), 'season' => '2099', 'matchday' => 7]);
+        $this->assertCount($count + 1, $this->getJson('/api/v1/fixtures/filter-options')->json('data'));
+        DB::table('fixtures')->where('season', '2099')->delete();
+        $this->assertCount($count + 1, $this->getJson('/api/v1/fixtures/filter-options')->json('data'));
     }
 
     public function test_malformed_batch_is_rejected_before_any_domain_writes(): void

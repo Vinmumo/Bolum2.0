@@ -67,6 +67,9 @@ return [
 
     'timezone' => 'UTC',
 
+    // Requests per minute per user (or IP for guests) across the whole API.
+    'api_rate_limit' => (int) env('API_RATE_LIMIT', 120),
+
     /*
     |--------------------------------------------------------------------------
     | Application Locale Configuration

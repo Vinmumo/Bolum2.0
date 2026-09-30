@@ -40,6 +40,7 @@ Artisan::command('providers:prune', function () {
     $this->info('Removed '.$count.' old provider records.');
 })->purpose('Retain 30 days of provider telemetry');
 Schedule::command('providers:prune')->daily();
+Schedule::command('sanctum:prune-expired', ['--hours' => 24])->daily();
 Artisan::command('demo:refresh', function () {
     if (! app()->environment(['local', 'testing'])) {
         $this->error('Sample refresh is available only in local and testing environments.');

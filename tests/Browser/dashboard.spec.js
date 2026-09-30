@@ -629,3 +629,31 @@ test('rate limiting tells the user how long to wait', async ({ page }) => {
     await page.locator('#search').fill('North');
     await expect(page.locator('#fixtures')).toContainText('Please wait 12 seconds before trying again.');
 });
+
+test('background polling keeps keyboard focus on an unchanged pending prediction', async ({ page }) => {
+    await signIn(page, 'member@bolum.test');
+    await page.locator('[data-fixture]').first().click();
+    await page.locator('#generate').click();
+    await expect(page.locator('#detail-body')).toContainText('Your prediction is queued');
+    await page.locator('#detail-dialog [data-close]').click();
+    await page.locator('.sidebar [data-tab="predictions"]').click();
+    const button = page.locator('#predictions [data-prediction]').first();
+    await button.focus();
+    // A property, not an attribute: changing the markup would legitimately trigger a re-render.
+    await button.evaluate(el => { el.focusProbe = true; });
+    let polls = 0;
+    page.on('request', request => { if (/\/predictions\?per_page=15/.test(request.url())) polls++; });
+    await expect.poll(() => polls, {timeout:12000}).toBeGreaterThanOrEqual(2);
+    expect(await page.evaluate(() => document.activeElement?.focusProbe)).toBe(true);
+});
+
+test('expanding the sidebar on hover overlays the content without shifting it', async ({ page }) => {
+    await page.goto('/');
+    await parkPointer(page);
+    await expect(page.locator('html')).toHaveAttribute('data-sidebar','collapsed');
+    const before = await page.locator('.main-shell').boundingBox();
+    await page.locator('.sidebar').hover();
+    await expect(page.locator('html')).toHaveAttribute('data-sidebar','expanded');
+    await expect(page.locator('.sidebar')).toHaveCSS('width','230px');
+    expect((await page.locator('.main-shell').boundingBox()).x).toBe(before.x);
+});

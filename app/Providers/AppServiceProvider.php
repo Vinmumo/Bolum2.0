@@ -7,6 +7,7 @@ use App\Models\User;
 use App\Services\Providers\SampleFootballProvider;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Foundation\DevCommands;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
@@ -22,6 +23,8 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         Model::preventLazyLoading(! app()->isProduction());
+        // Assets are served directly from public/assets; package.json only holds test and dev tooling.
+        DevCommands::except('vite');
         Gate::define('manage-catalog', fn (User $user) => $user->is_admin);
         RateLimiter::for('api', fn (Request $r) => Limit::perMinute(config('app.api_rate_limit'))->by($r->user()?->id ?: $r->ip()));
         // Per-IP caps bursts; email|IP slows repeated guesses against one account without letting others lock it.

@@ -36,7 +36,7 @@ For an existing installation, normally use `composer install`, `php artisan migr
 
 ### Windows / Herd
 
-Use PHP 8.4+ for this project. The PHP executable in your terminal must also satisfy that requirement; a web-server PHP selection alone does not establish which executable PowerShell uses.
+Use PHP 8.4.1+ for this project. The PHP executable in your terminal must also satisfy that requirement; a web-server PHP selection alone does not establish which executable PowerShell uses.
 
 ```powershell
 Get-Command php

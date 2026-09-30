@@ -4,7 +4,7 @@ Bolum combines a Laravel 13 API with a responsive dashboard for fixtures, compan
 
 ## Start locally
 
-Requires **PHP 8.4+**, Composer, and PDO SQLite. The dashboard is served directly by Laravel, so **no frontend build is needed to run it**.
+Requires **PHP 8.4.1+**, Composer, and PDO SQLite. The dashboard is served directly by Laravel, so **no frontend build is needed to run it**.
 
 From the project directory, these commands work in Bash and Windows PowerShell:
 
@@ -13,7 +13,7 @@ composer setup
 php artisan serve
 ```
 
-Setup installs the locked dependencies, creates `.env` and the SQLite file if missing, generates a key only when absent, and migrates/seeds without resetting existing data. It is intended for local use. For Windows/Herd, select PHP 8.4+ for this project and confirm that terminal `php -v` uses that version.
+Setup installs the locked dependencies, creates `.env` and the SQLite file if missing, generates a key only when absent, and migrates/seeds without resetting existing data. It is intended for local use. For Windows/Herd, select PHP 8.4.1+ for this project and confirm that terminal `php -v` uses that version.
 
 For manual steps, MySQL configuration and migration troubleshooting, see [Installation guide](docs/INSTALLATION.md). MySQL should use **8.0/8.4, InnoDB and pages of at least 16 KB**; new tables explicitly use DYNAMIC row format. The default SQLite setup avoids MySQL server-configuration differences.
 

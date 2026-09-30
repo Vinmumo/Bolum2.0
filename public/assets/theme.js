@@ -15,21 +15,42 @@
     }
     let saved;
     try { saved = localStorage.getItem(key); } catch { /* Theme still works when storage is unavailable. */ }
-    try { root.dataset.sidebar=localStorage.getItem('bolum.sidebar')==='collapsed'?'collapsed':'expanded'; } catch { root.dataset.sidebar='expanded'; }
+    const hoverSidebar = window.matchMedia('(min-width: 721px) and (hover: hover) and (pointer: fine)');
+    root.dataset.sidebar = hoverSidebar.matches ? 'collapsed' : 'expanded';
     apply(saved);
     document.addEventListener('DOMContentLoaded', () => {
         apply(root.dataset.theme);
-        const sidebarButton=document.getElementById('sidebar-toggle');
+        const sidebar = document.querySelector('.sidebar');
+        let hovered = false;
+        let keyboardNavigation = false;
         function syncSidebar() {
-            const expanded=root.dataset.sidebar!=='collapsed';
-            sidebarButton.setAttribute('aria-expanded',String(expanded));
-            sidebarButton.setAttribute('aria-label',expanded?'Collapse sidebar':'Expand sidebar');
-            sidebarButton.title=expanded?'Collapse sidebar':'Expand sidebar';
+            const keyboardFocus = keyboardNavigation && sidebar.contains(document.activeElement);
+            root.dataset.sidebar = !hoverSidebar.matches || hovered || keyboardFocus ? 'expanded' : 'collapsed';
         }
         syncSidebar();
-        sidebarButton.addEventListener('click',()=>{
-            root.dataset.sidebar=root.dataset.sidebar==='collapsed'?'expanded':'collapsed'; syncSidebar();
-            try {localStorage.setItem('bolum.sidebar',root.dataset.sidebar);} catch {}
+        sidebar.addEventListener('pointerenter', event => {
+            if (event.pointerType === 'touch') return;
+            hovered = true;
+            syncSidebar();
+        });
+        sidebar.addEventListener('pointerleave', () => {
+            hovered = false;
+            syncSidebar();
+        });
+        document.addEventListener('keydown', event => {
+            if (event.key !== 'Tab') return;
+            keyboardNavigation = true;
+            syncSidebar();
+        });
+        document.addEventListener('pointerdown', () => {
+            keyboardNavigation = false;
+            syncSidebar();
+        });
+        sidebar.addEventListener('focusin', syncSidebar);
+        sidebar.addEventListener('focusout', () => queueMicrotask(syncSidebar));
+        hoverSidebar.addEventListener('change', () => {
+            hovered = hoverSidebar.matches && sidebar.matches(':hover');
+            syncSidebar();
         });
         document.getElementById('theme-toggle').addEventListener('click', () => {
             apply(root.dataset.theme === 'dark' ? 'light' : 'dark');

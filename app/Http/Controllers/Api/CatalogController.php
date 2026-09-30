@@ -8,13 +8,15 @@ use App\Data\CreateLeagueData;
 use App\Data\CreateTeamData;
 use App\Data\ProviderData;
 use App\Http\Controllers\Controller;
-use App\Http\Requests\ListRequest;
+use App\Http\Requests\CatalogQueryRequest;
 use App\Http\Resources\CatalogResource;
 use App\Models\League;
 use App\Models\Provider;
 use App\Models\Team;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Spatie\QueryBuilder\AllowedFilter;
+use Spatie\QueryBuilder\QueryBuilder;
 
 class CatalogController extends Controller
 {
@@ -25,11 +27,25 @@ class CatalogController extends Controller
         };
     }
 
-    public function index(ListRequest $request)
+    public function index(CatalogQueryRequest $request)
     {
         $model = $this->model($request->route()->defaults['catalog']);
+        $filters = [AllowedFilter::partial('name')->delimiter('')];
+        $filters = [...$filters, ...match ($model) {
+            League::class => [AllowedFilter::partial('country')->delimiter('')],
+            Team::class => [AllowedFilter::exact('league_id')],
+            Provider::class => [AllowedFilter::exact('driver'), AllowedFilter::exact('is_active')],
+        }];
 
-        return CatalogResource::collection($model::query()->when($model === Team::class && $request->filled('league_id'), fn ($q) => $q->where('league_id', $request->integer('league_id')))->orderBy('id')->paginate($request->integer('per_page', 15)));
+        $records = QueryBuilder::for($model, $request->forQueryBuilder())
+            ->allowedFilters(...$filters)
+            ->defaultSort('id')
+            ->allowedSorts(...($model === Provider::class ? ['id', 'name', 'weight'] : ['id', 'name']))
+            ->allowedIncludes(...($model === Team::class ? ['league'] : []))
+            ->paginate($request->integer('per_page', 15))
+            ->appends($request->query());
+
+        return CatalogResource::collection($records);
     }
 
     public function store(Request $request, CreateCatalogEntryAction $action)

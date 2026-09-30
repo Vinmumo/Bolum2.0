@@ -7,11 +7,11 @@
     <meta name="description" content="Bolum football analytics. Explore fixtures, compare predictions and track your results.">
     <meta name="theme-color" content="#090c10">
     <title>Bolum — Football intelligence</title>
-    <script src="/assets/theme.js"></script>
+    <script src="/assets/theme.js?v={{ filemtime(public_path('assets/theme.js')) }}"></script>
     <link rel="stylesheet" href="/assets/dashboard.css">
     <link rel="stylesheet" href="/assets/theme.css">
-    <link rel="stylesheet" href="/assets/workspace.css">
-    <script src="/assets/dashboard.js" defer></script>
+    <link rel="stylesheet" href="/assets/workspace.css?v={{ filemtime(public_path('assets/workspace.css')) }}">
+    <script src="/assets/dashboard.js?v={{ filemtime(public_path('assets/dashboard.js')) }}" defer></script>
 </head>
 <body>
 <a class="skip-link" href="#main-content">Skip to content</a>
@@ -20,7 +20,6 @@
     <aside class="sidebar">
         <a class="brand" href="/" aria-label="Bolum home"><span class="brand-mark">b<span></span></span>bolum<span class="brand-dot">.</span></a>
         <div class="workspace-label">FOOTBALL INTELLIGENCE</div>
-        <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-controls="main-navigation" aria-expanded="true" aria-label="Collapse sidebar">☰ <span class="sidebar-toggle-label">Collapse sidebar</span></button>
         <nav id="main-navigation" aria-label="Main navigation">
             <button class="nav-item active" data-tab="matches"><span aria-hidden="true">▦</span> Match center <i>01</i></button>
             <button class="nav-item" data-tab="predictions"><span aria-hidden="true">◈</span> Predictions <i>02</i></button>
@@ -34,7 +33,7 @@
     <div class="main-shell">
         <header class="topbar">
             <div class="breadcrumb">Workspace <span>/</span> <strong id="page-label">Match center</strong></div>
-            <div class="topbar-actions"><button id="theme-toggle" class="button secondary theme-toggle" type="button" aria-label="Switch to light theme"><span aria-hidden="true">☀</span><span>Light</span></button><label class="sr-only" for="company">Workspace</label><select id="company" hidden></select><button id="account" class="account-button">Sign in <span class="avatar">→</span></button><button id="logout" class="button secondary" aria-label="Sign out" hidden>↪</button></div>
+            <div class="topbar-actions"><button id="theme-toggle" class="button secondary theme-toggle" type="button" aria-label="Switch to light theme"><span aria-hidden="true">☀</span><span>Light</span></button><label class="sr-only" for="company">Workspace</label><select id="company" hidden></select><button id="account" class="account-button">Sign in <span class="avatar">→</span></button><button id="logout" class="button secondary" type="button" title="Sign out of Bolum" aria-label="Sign out" hidden><span aria-hidden="true">↪</span> Sign out</button></div>
         </header>
         <main id="main-content" tabindex="-1">
             <section class="page-heading"><div><div class="eyebrow"><span class="tiny-dot"></span> THE MATCHDAY PERSPECTIVE</div><h1 id="page-title">A better view of the game<span>.</span></h1><p id="page-description">Explore the fixtures. Find the probabilities. Follow the results.</p></div><div id="today" class="date-card"></div></section>
@@ -47,7 +46,7 @@
             <section id="matches-panel" class="tab-panel">
                 <div class="section-heading"><div><h2>Match center <span class="tag">FIXTURES</span></h2><p id="fixture-context">Your next match starts here.</p></div><button id="new-fixture" class="button secondary admin-only" hidden>+ Add fixture</button></div>
                 <div class="match-views" role="group" aria-label="Match views"><button class="view-chip" data-match-view="upcoming" aria-pressed="true">Upcoming</button><button class="view-chip" data-match-view="live" aria-pressed="false">Live</button><button class="view-chip" data-match-view="finished" aria-pressed="false">Results</button><button class="view-chip" data-match-view="" aria-pressed="false">All matches</button></div>
-                <form id="filters" class="filters"><label class="search"><span aria-hidden="true">⌕</span><input id="search" name="q" placeholder="Search for a team…" aria-label="Search teams" maxlength="100"></label><label><span class="sr-only">League</span><select id="league-filter" name="league_id" aria-describedby="league-filter-hint"><option value="">All leagues</option></select></label><label><span class="sr-only">Season</span><select id="season-filter" name="season"><option value="">All seasons</option></select></label><label><span class="sr-only">Gameweek</span><select id="matchday-filter" name="matchday"><option value="">All gameweeks</option></select></label><label><span class="sr-only">Fixture status</span><select name="status" id="status-filter"><option value="upcoming">Upcoming</option><option value="">All matches</option><option value="scheduled">Scheduled</option><option value="live">Live</option><option value="finished">Finished</option><option value="postponed">Postponed</option><option value="cancelled">Cancelled</option></select></label><button class="button secondary" type="submit">Apply filters</button><button id="reset-filters" class="button secondary" type="button">Reset</button></form>
+                <form id="filters" class="filters"><label class="search"><span aria-hidden="true">⌕</span><input id="search" type="search" name="q" autocomplete="off" placeholder="Type a team name to filter…" aria-label="Search teams" maxlength="100"></label><label><span class="sr-only">League</span><select id="league-filter" name="league_id" aria-describedby="league-filter-hint"><option value="">All leagues</option></select></label><label><span class="sr-only">Season</span><select id="season-filter" name="season"><option value="">All seasons</option></select></label><label><span class="sr-only">Gameweek</span><select id="matchday-filter" name="matchday"><option value="">All gameweeks</option></select></label><label><span class="sr-only">Fixture status</span><select name="status" id="status-filter"><option value="upcoming">Upcoming</option><option value="">All matches</option><option value="scheduled">Scheduled</option><option value="live">Live</option><option value="finished">Finished</option><option value="postponed">Postponed</option><option value="cancelled">Cancelled</option></select></label><button class="button secondary" type="submit">Apply filters</button><button id="reset-filters" class="button secondary" type="button">Reset</button></form>
                 <p id="league-filter-hint" class="panel-note"></p>
                 <div id="fixtures" class="fixture-grid" aria-live="polite"><div class="empty">Loading fixtures…</div></div>
                 <div class="pagination"><span id="fixture-page-label"></span><div><button id="fixtures-prev" class="button secondary">← Previous</button><button id="fixtures-next" class="button secondary">Next →</button></div></div>

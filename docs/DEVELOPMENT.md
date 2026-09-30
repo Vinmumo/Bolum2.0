@@ -16,7 +16,7 @@ For prediction requests, follow these components:
 
 ## Code organization
 
-- **ListRequest** remains a Form Request for read-only catalog filters. Mutation validation belongs to Data classes.
+- **CatalogQueryRequest/ListRequest** validate read-only filters; Spatie Query Builder applies allowed filters/sorts/includes to catalog listings. Mutation validation belongs to Data classes.
 - **Policies and gates** enforce permissions. Global catalog administration uses a gate; company and prediction actions use policies.
 - **API controllers** live in `Http/Controllers/Api`, map HTTP input to Data, delegate operations and return API Resources. `SessionController` owns the browser session lifecycle.
 - **Data objects** extend Spatie `Data`, declare typed properties and `rules()`, and validate when constructed with `::from($request)`. Use `::validateAndCreate($array)` for untrusted arrays; constructors and default `::from($array)` do not guarantee validation.
@@ -89,3 +89,5 @@ Authorization runs in controller Gates/Policies or route middleware before Data 
 Resources still define API responses. Input Data objects containing passwords must never be returned as responses. `ListRequest` and some report-controller validation remain for read-only filters.
 
 See [Spatie request validation](https://spatie.be/docs/laravel-data/v4/as-a-data-transfer-object/request-to-data-object) and [optional properties](https://spatie.be/docs/laravel-data/v4/as-a-data-transfer-object/optional-properties).
+
+For list behavior, see the [catalog query contract](API.md#catalog-filtering-and-sorting). Define allowed fields explicitly; do not pass arbitrary query keys into SQL identifiers. `QueryBuilderTest` checks legacy/nested URL equivalence, filter validation, pagination, includes and authorization. The v7 package accepts variadic filter/sort/include arguments, unlike older examples that pass an array directly.

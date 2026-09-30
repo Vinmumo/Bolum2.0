@@ -8,20 +8,42 @@ use App\Actions\Fixtures\UpdateFixtureAction;
 use App\Data\CreateFixtureData;
 use App\Data\UpdateFixtureData;
 use App\Http\Controllers\Controller;
-use App\Http\Requests\ListRequest;
+use App\Http\Requests\CatalogQueryRequest;
 use App\Http\Resources\FixtureResource;
 use App\Models\Fixture;
 use App\Services\MatchHistory;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Spatie\QueryBuilder\AllowedFilter;
+use Spatie\QueryBuilder\QueryBuilder;
 
 class FixtureController extends Controller
 {
     private const RELATIONS = ['league', 'homeTeam', 'awayTeam'];
 
-    public function index(ListRequest $request)
+    public function index(CatalogQueryRequest $request)
     {
-        return FixtureResource::collection(Fixture::with(self::RELATIONS)->when($request->filled('matchday'), fn ($q) => $q->where('matchday', $request->integer('matchday')))->when($request->filled('q'), fn ($q) => $q->where(fn ($q) => $q->whereHas('homeTeam', fn ($q) => $q->where('name', 'like', '%'.$request->input('q').'%'))->orWhereHas('awayTeam', fn ($q) => $q->where('name', 'like', '%'.$request->input('q').'%'))))->when($request->filled('status'), fn ($q) => $request->input('status') === 'finished' ? $q->where('is_finished', true) : $q->where('status', $request->input('status'))->where('is_finished', false))->when($request->filled('season'), fn ($q) => $q->where('season', $request->input('season')))->when($request->filled('league_id'), fn ($q) => $q->where('league_id', $request->integer('league_id')))->when($request->boolean('upcoming'), fn ($q) => $q->upcoming())->orderBy('id')->paginate($request->integer('per_page', 15)));
+        $fixtures = QueryBuilder::for(Fixture::with(self::RELATIONS), $request->forQueryBuilder())
+            ->allowedFilters(...[
+                AllowedFilter::exact('league_id'),
+                AllowedFilter::exact('matchday'),
+                AllowedFilter::exact('season'),
+                AllowedFilter::callback('q', fn ($query, $value) => $query->where(fn ($teams) => $teams
+                    ->whereHas('homeTeam', fn ($team) => $team->where('name', 'like', '%'.$value.'%'))
+                    ->orWhereHas('awayTeam', fn ($team) => $team->where('name', 'like', '%'.$value.'%'))))->delimiter(''),
+                AllowedFilter::callback('status', fn ($query, $value) => $value === 'finished'
+                    ? $query->where('is_finished', true)
+                    : $query->where('status', $value)->where('is_finished', false)),
+                AllowedFilter::callback('upcoming', fn ($query, $value) => $query->when(filter_var($value, FILTER_VALIDATE_BOOLEAN),
+                    fn ($query) => $query->where('kickoff_at', '>', now())->where('is_finished', false)->where('status', 'scheduled'))),
+            ])
+            ->defaultSort('id')
+            ->allowedSorts(...['id', 'kickoff_at', 'matchday'])
+            ->allowedIncludes(...self::RELATIONS)
+            ->paginate($request->integer('per_page', 15))
+            ->appends($request->query());
+
+        return FixtureResource::collection($fixtures);
     }
 
     public function show(Fixture $fixture, MatchHistory $history)

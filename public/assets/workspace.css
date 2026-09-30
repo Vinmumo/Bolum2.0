@@ -102,10 +102,10 @@ h1 { font-size: clamp(24px,2.3vw,32px); }
     .account-button { max-width: 170px; overflow-wrap: anywhere; }
 }
 
-/* Expanded by default; the rail remains an explicit, remembered choice. */
-.sidebar-toggle { display: flex; align-items: center; justify-content: center; gap: 12px; width: 100%; min-height: 40px; background: transparent; color: #b9c6d3; border: 1px solid #33404c; border-radius: 7px; margin-bottom: 18px; }
-.sidebar-toggle-label { font-size: 12px; }
-:root[data-sidebar="collapsed"] .sidebar-toggle-label { display: none; }
+/* Reveal desktop labels on hover or keyboard navigation; touch navigation stays open. */
+.sidebar { transition: width 160ms ease, padding 160ms ease; }
+.sidebar .nav-item, .sidebar .brand { white-space: nowrap; }
+.main-shell { transition: margin-left 160ms ease; }
 :root[data-sidebar="expanded"] .sidebar { width: 230px; padding: 27px 18px; }
 :root[data-sidebar="expanded"] .sidebar .brand { font-size: 29px; gap: 10px; }
 :root[data-sidebar="expanded"] .sidebar .nav-item { font-size: 13px; width: 100%; justify-content: flex-start; gap: 12px; }
@@ -146,9 +146,7 @@ body.operations-mode { --bg: #0b1020; --surface: #131c31; --raised: #202c44; --h
     :root[data-sidebar="expanded"] .sidebar, :root[data-sidebar="collapsed"] .sidebar { width: 100%; padding: 18px; }
     :root[data-sidebar] .main-shell { margin-left: 0; }
     :root[data-sidebar="expanded"] .sidebar .nav-item { width: auto; font-size: 12px; }
-    :root[data-sidebar="collapsed"] .sidebar nav { display: none; }
-    .sidebar-toggle { width: auto; padding: 0 12px; position: absolute; top: 18px; right: 18px; }
-    .sidebar-toggle-label { display: none; }
+    :root[data-sidebar="expanded"] .topbar { padding: 12px 18px; }
     .operations-mode .page-heading { padding: 20px; }
     .track-summary article { padding: 16px; }
 }

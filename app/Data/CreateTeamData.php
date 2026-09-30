@@ -13,11 +13,11 @@ class CreateTeamData extends Data
         public string $name,
     ) {}
 
-    public static function rules(ValidationContext $context): array
+    public static function rules(?ValidationContext $context = null): array
     {
         return [
             'league_id' => ['required', 'integer', 'exists:leagues,id'],
-            'name' => ['required', 'string', 'max:100', Rule::unique('teams')->where('league_id', $context->payload['league_id'] ?? null)],
+            'name' => ['required', 'string', 'max:100', Rule::unique('teams')->where('league_id', $context?->payload['league_id'] ?? null)],
         ];
     }
 }

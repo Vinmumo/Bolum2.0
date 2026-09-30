@@ -3,6 +3,7 @@
 namespace App\Data;
 
 use Spatie\LaravelData\Data;
+use Spatie\LaravelData\Support\Validation\ValidationContext;
 
 class RecordFixtureResultData extends Data
 {
@@ -11,7 +12,7 @@ class RecordFixtureResultData extends Data
         public int $away_goals,
     ) {}
 
-    public static function rules(): array
+    public static function rules(?ValidationContext $context = null): array
     {
         return [
             'home_goals' => ['required', 'integer', 'between:0,100'],

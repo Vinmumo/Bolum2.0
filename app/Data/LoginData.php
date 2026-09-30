@@ -3,6 +3,7 @@
 namespace App\Data;
 
 use Spatie\LaravelData\Data;
+use Spatie\LaravelData\Support\Validation\ValidationContext;
 
 class LoginData extends Data
 {
@@ -11,7 +12,7 @@ class LoginData extends Data
         public string $password,
     ) {}
 
-    public static function rules(): array
+    public static function rules(?ValidationContext $context = null): array
     {
         return [
             'email' => ['required', 'email'],

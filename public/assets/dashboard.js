@@ -72,9 +72,29 @@
     }
     function notice(message, error = false) {
         clearTimeout(toastTimer); $('notice').textContent = message; $('notice').className = `notice${error ? ' error' : ''}`; $('notice').hidden = false;
+        const action = /reload/i.test(message) ? ['Reload page', () => location.reload()] : error && !state.user && /sign in/i.test(message) ? ['Sign in', () => $('auth-dialog').showModal()] : null;
+        if (action) { const button = document.createElement('button'); button.type = 'button'; button.className = 'button secondary'; button.textContent = action[0]; button.onclick = action[1]; $('notice').append(' ', button); }
         if (!error) toastTimer = setTimeout(() => $('notice').hidden = true, 6500);
     }
+    function requestErrorMessage(response, body) {
+        const messages = {
+            400: "Some request details or filters aren't supported. Check them and try again.",
+            401: 'Your session has ended. Please sign in again.',
+            403: "You don't have permission to do that.",
+            404: "We couldn't find what you requested. It may have been removed.",
+            419: 'This page has expired. Reload it and try again.',
+            503: 'This service is temporarily unavailable. Please try again shortly.',
+        };
+        if (response.status === 429) {
+            const seconds = Number(response.headers.get('Retry-After'));
+            return seconds > 0 && Number.isFinite(seconds) ? `Please wait ${Math.ceil(seconds)} seconds before trying again.` : "You're making requests too quickly. Wait a moment and try again.";
+        }
+        if (messages[response.status]) return messages[response.status];
+        if (response.status >= 500) return 'Something went wrong on our side. Please try again.';
+        return Object.values(body.errors || {}).flat()[0] || body.message || 'We couldn’t complete that request. Please try again.';
+    }
     async function api(path, {method='GET',data,headers={},background=false} = {}) {
+        const identityEpoch = state.epoch;
         const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 30000);
         if (!background) networkBusy(1);
         try {
@@ -83,7 +103,10 @@
         catch { throw new Error(controller.signal.aborted ? 'The request took too long. Try again.' : 'Unable to reach Bolum. Check your connection and try again.'); }
         const body = response.status === 204 ? {} : await response.json().catch(() => ({}));
         if (!response.ok) {
-            const message = response.status === 419 ? 'Your session expired. Reload this page and sign in again.' : Object.values(body.errors || {}).flat()[0] || body.message || 'The request could not be completed.';
+            const message = requestErrorMessage(response, body);
+            if (response.status === 401 && state.user && identityEpoch === state.epoch) {
+                clearIdentity(); setTab('matches'); notice(message, true);
+            }
             const error = new Error(message); error.status = response.status; error.fields = body.errors || {}; throw error;
         }
         if (body.csrf_token) csrf = body.csrf_token;
@@ -174,14 +197,20 @@
         });
     }
     function clearIdentity() {
-        state.user=null; state.companies=[]; state.company=null; state.epoch++; state.keys.clear(); state.detailVersion++;
-        $('detail-dialog').close(); renderIdentity();
-        for(const id of ['providers','provider-usage','admin-overview','track-record','performance','profile']) $(id).innerHTML='';
+        state.user=null; state.companies=[]; state.company=null; state.predictions=[]; state.providers=[];
+        state.prediction=null; state.selected=null; state.historyPage=1; state.epoch++; state.keys.clear(); state.detailVersion++;
+        for (const id of ['detail-dialog','topup-dialog','provider-dialog','fixture-dialog']) $(id).close();
+        renderIdentity();
+        for(const id of ['providers','provider-usage','admin-overview','track-record','performance','profile','detail-body']) $(id).innerHTML='';
+        void loadPrivate();
     }
     async function signOut(button) {
         const restore=buttonLoading(button,'Signing out…');
         try {await api('/session/logout',{method:'POST',data:{}}); clearIdentity(); setTab('matches'); await loadPrivate(); notice('You are signed out.');}
-        catch(error) {notice(error.message,true);} finally {restore();}
+        catch(error) {
+            if (error.status === 401) { clearIdentity(); setTab('matches'); notice('You are already signed out.'); }
+            else notice(error.message,true);
+        } finally {restore();}
     }
     function companyPath(path) { return `/api/v1/companies/${state.company}${path}`; }
     function empty(title, description, signin = false) { return `<div class="empty"><strong>${esc(title)}</strong>${esc(description)}${signin ? '<br><button class="button primary" data-signin>Sign in →</button>' : ''}</div>`; }
@@ -512,8 +541,19 @@
     $('logout').onclick = () => signOut($('logout'));
     $('show-register').onclick = () => { $('auth-dialog').close(); $('register-dialog').showModal(); };
     $('company').onchange = async () => { state.company=Number($('company').value); state.epoch++; state.historyPage=1; state.predictions=[]; state.detailVersion++; $('detail-dialog').close(); renderIdentity(); $('prediction-count').textContent = $('credit-count').textContent = '…'; $('predictions').innerHTML = $('ledger').innerHTML = empty('Loading workspace data…',''); $('performance').innerHTML = ''; $('track-record').innerHTML = ''; renderFixtures(); try { await loadPrivate(); if(state.tab==='performance') await loadPerformance(); if(state.tab==='providers' && state.adminView==='record') await loadTrackRecord(); } catch(error) { notice(error.message,true); } };
-    $('reset-filters').onclick = () => { $('search').value = ''; $('league-filter').selectedIndex=0; $('season-filter').value=''; matchRounds(); $('matchday-filter').value=''; $('status-filter').value = 'upcoming'; $('filters').requestSubmit(); };
-    $('search').addEventListener('input',()=>{clearTimeout(searchTimer); fixtureRequest++; state.page=1; searchTimer=setTimeout(()=>$('filters').requestSubmit(),300);});
+    $('reset-filters').onclick = () => { $('search').value = ''; previousSearchValue = ''; $('league-filter').selectedIndex=0; $('season-filter').value=''; matchRounds(); $('matchday-filter').value=''; $('status-filter').value = 'upcoming'; $('filters').requestSubmit(); };
+    let previousSearchValue = $('search').value;
+    function searchChanged(event) {
+        if (event.isComposing) { clearTimeout(searchTimer); fixtureRequest++; return; }
+        if ($('search').value === previousSearchValue) return;
+        clearTimeout(searchTimer);
+        previousSearchValue = $('search').value;
+        fixtureRequest++; state.page = 1;
+        searchTimer = setTimeout(() => $('filters').requestSubmit(), $('search').value.trim() ? 300 : 0);
+    }
+    $('search').addEventListener('input', searchChanged);
+    $('search').addEventListener('change', searchChanged);
+    $('search').addEventListener('compositionend', searchChanged);
     for(const id of ['league-filter','season-filter','matchday-filter','status-filter']) $(id).addEventListener('change',()=>{
         if(['league-filter','season-filter'].includes(id)) { $('matchday-filter').value=''; matchRounds(); }
         $('filters').requestSubmit();
@@ -543,7 +583,7 @@
             }
             if (state.predictions.some(p=>p.status==='pending')) await loadPrivate({quiet:true});
             if (state.tab==='providers' && state.adminView!=='record') await loadProviders({quiet:true});
-        } catch(error) { if($('prediction-sync')) $('prediction-sync').textContent='Unable to refresh the result. Retrying automatically…'; if(error.status===401) { notice('Your session expired. Sign in again.',true); state.company=null; } }
+        } catch(error) { if($('prediction-sync')) $('prediction-sync').textContent='Unable to refresh the result. Retrying automatically…'; if(error.status===401 && !state.user) notice(error.message,true); }
         finally { state.polling=false; }
     }
     document.querySelectorAll('.sidebar [data-tab]').forEach(button=>button.title=button.textContent.replace(/\d+/g,'').trim());

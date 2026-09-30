@@ -3,6 +3,7 @@
 namespace App\Data;
 
 use Spatie\LaravelData\Data;
+use Spatie\LaravelData\Support\Validation\ValidationContext;
 
 class TopUpCreditsData extends Data
 {
@@ -11,7 +12,7 @@ class TopUpCreditsData extends Data
         public string $idempotency_key,
     ) {}
 
-    public static function rules(): array
+    public static function rules(?ValidationContext $context = null): array
     {
         return [
             'amount' => ['required', 'integer', 'between:1,10000'],

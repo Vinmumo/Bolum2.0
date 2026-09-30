@@ -159,7 +159,7 @@ test('fixture loading holds its layout, recovers after errors, and respects redu
     await expect(page.locator('.fixture-card')).toHaveCount(4);
     await expect(page.locator('#fixtures')).toHaveAttribute('aria-busy','false');
     await page.getByRole('button',{name:'Apply filters'}).click();
-    await expect(page.locator('#fixtures')).toContainText('Fixture feed temporarily unavailable.');
+    await expect(page.locator('#fixtures')).toContainText('This service is temporarily unavailable. Please try again shortly.');
     await expect(page.locator('#fixtures')).toHaveAttribute('aria-busy','false');
     await expect(page.locator('#network-status')).not.toBeVisible();
     await page.locator('#fixtures [data-retry]').click();
@@ -181,7 +181,7 @@ test('match details provide a recoverable loading state', async ({ page }) => {
     await expect(page.locator('#detail-body')).toHaveAttribute('aria-busy','true');
     await expect(page.locator('#detail-body')).toContainText('Loading match analysis');
     release();
-    await expect(page.locator('#detail-body')).toContainText('Match details temporarily unavailable.');
+    await expect(page.locator('#detail-body')).toContainText('This service is temporarily unavailable. Please try again shortly.');
     await expect(page.locator('#detail-body')).toHaveAttribute('aria-busy','false');
     await page.locator('#detail-body [data-retry]').click();
     await expect(page.locator('#generate')).toBeVisible();
@@ -411,21 +411,49 @@ test('prediction requests show progress and an inline recoverable failure',async
 });
 
 
-test('sidebar expands by default and remembers a keyboard-accessible collapsed preference',async({page})=>{
+test('sidebar opens on hover and closes after leaving even after clicking a navigation item',async({page})=>{
     await page.goto('/');
-    await expect(page.locator('html')).toHaveAttribute('data-sidebar','expanded');
-    await page.getByRole('button',{name:'Collapse sidebar',exact:true}).focus();
-    await page.keyboard.press('Enter');
+    await expect(page.locator('#sidebar-toggle')).toHaveCount(0);
     await expect(page.locator('html')).toHaveAttribute('data-sidebar','collapsed');
+    await page.locator('.sidebar').hover();
+    await expect(page.locator('html')).toHaveAttribute('data-sidebar','expanded');
+    await page.locator('.sidebar [data-tab="matches"]').click();
+    await page.locator('h1').hover();
+    await expect(page.locator('html')).toHaveAttribute('data-sidebar','collapsed');
+    await page.evaluate(()=>localStorage.setItem('bolum.sidebar','expanded'));
     await page.reload();
-    await expect(page.getByRole('button',{name:'Expand sidebar',exact:true})).toHaveAttribute('aria-expanded','false');
-    await page.getByRole('button',{name:'Expand sidebar',exact:true}).click();
+    await expect(page.locator('html')).toHaveAttribute('data-sidebar','collapsed');
+});
+
+test('sidebar opens for keyboard navigation and mobile navigation stays visible',async({page})=>{
+    await page.goto('/');
+    await page.locator('.skip-link').focus();
+    await page.keyboard.press('Tab');
+    await expect(page.locator('.sidebar .brand')).toBeFocused();
+    await expect(page.locator('html')).toHaveAttribute('data-sidebar','expanded');
+    await page.keyboard.press('Tab');
+    await expect(page.locator('.sidebar [data-tab="matches"]')).toBeFocused();
+    await page.locator('#search').focus();
+    await expect(page.locator('html')).toHaveAttribute('data-sidebar','collapsed');
     await page.setViewportSize({width:390,height:844});
-    await page.getByRole('button',{name:'Collapse sidebar',exact:true}).click();
-    await expect(page.locator('#main-navigation')).not.toBeVisible();
-    await page.getByRole('button',{name:'Expand sidebar',exact:true}).click();
     await expect(page.locator('#main-navigation')).toBeVisible();
+    await expect(page.locator('html')).toHaveAttribute('data-sidebar','expanded');
+    await expect(page.locator('.sidebar [data-tab="matches"]')).toHaveCSS('font-size','12px');
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+});
+
+test('sidebar labels stay open on a touchscreen without hover',async({browser,baseURL})=>{
+    const context=await browser.newContext({hasTouch:true,viewport:{width:1024,height:768}});
+    try {
+        const page=await context.newPage();
+        await page.goto(baseURL);
+        await expect(page.locator('html')).toHaveAttribute('data-sidebar','expanded');
+        await expect(page.locator('.sidebar [data-tab="matches"]')).toHaveCSS('font-size','13px');
+        await page.locator('.sidebar [data-tab="matches"]').tap();
+        await expect(page.locator('#main-navigation')).toBeVisible();
+    } finally {
+        await context.close();
+    }
 });
 
 test('search is debounced and a slow previous search cannot replace the latest results',async({page})=>{
@@ -517,4 +545,80 @@ test('club guide loads on demand with retry, attribution and escaped content', a
     await expect(page.locator('#club-profile img')).toHaveCount(0);
     await expect(page.locator('#club-profile a')).toHaveAttribute('href','https://www.thesportsdb.com/team/133604');
     await expect(page.locator('#club-profile')).toContainText('Not used in prediction calculations');
+});
+
+test('typing, blur and clearing search update results without submitting the filters', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('.fixture-card')).toHaveCount(4);
+    const search = page.getByRole('searchbox', { name: 'Search teams' });
+    await search.fill('North');
+    await search.press('Tab');
+    await expect(page.locator('.fixture-card')).toHaveCount(2);
+    await expect(page.locator('.fixture-card').first()).toContainText('North London');
+    await search.fill('Merseyside');
+    await expect(page.locator('.fixture-card').first()).toContainText('Merseyside Red');
+    await expect(page.locator('.fixture-card')).toHaveCount(2);
+    await expect(search).toBeFocused();
+    await search.fill('');
+    await expect(page.locator('.fixture-card')).toHaveCount(4);
+    await expect(search).toBeFocused();
+});
+
+test('signing out after the server session ended clears stale account and workspace data', async ({ page }) => {
+    await signIn(page);
+    await expect(page.locator('#credit-count')).toHaveText(/^\d+$/);
+    // End the actual server session without updating the already-open page.
+    const status = await page.evaluate(async () => (await fetch('/session/logout', {
+        method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json',
+            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content }, body: '{}',
+    })).status);
+    expect(status).toBe(200);
+    await page.locator('#logout').click();
+    await expect(page.locator('#account')).toContainText('Sign in');
+    await expect(page.locator('#logout')).toBeHidden();
+    await expect(page.locator('#company')).toBeHidden();
+    await expect(page.locator('#credit-count')).toHaveText('—');
+    await expect(page.locator('#predictions')).toContainText('Sign in');
+    await expect(page.locator('#notice')).toHaveText('You are already signed out.');
+    await expect(page.locator('[data-tab="providers"]')).toBeHidden();
+});
+
+test('a private request returning 401 clears the session UI and offers sign in', async ({ page }) => {
+    await signIn(page);
+    await page.route('**/api/v1/companies/*/performance*', route => route.fulfill({
+        status: 401, contentType: 'application/json', body: JSON.stringify({message: 'Unauthenticated.'}),
+    }));
+    await page.locator('[data-tab="performance"]').click();
+    await expect(page.locator('#account')).toContainText('Sign in');
+    await expect(page.locator('#credit-count')).toHaveText('—');
+    await expect(page.locator('#notice')).toContainText('Your session has ended. Please sign in again.');
+    await page.locator('#notice').getByRole('button', {name: 'Sign in', exact: true}).click();
+    await expect(page.locator('#auth-dialog')).toBeVisible();
+});
+
+test('server and CSRF failures show recovery messages without pretending sign out succeeded', async ({ page }) => {
+    await signIn(page);
+    const accountBefore = await page.locator('#account').textContent();
+    await page.route('**/session/logout', route => route.fulfill({status: 500, contentType: 'application/json',
+        body: JSON.stringify({message: 'SQLSTATE internal failure', trace: ['private path']})}));
+    await page.locator('#logout').click();
+    await expect(page.locator('#notice')).toHaveText('Something went wrong on our side. Please try again.');
+    await expect(page.locator('#account')).toHaveText(accountBefore);
+    await expect(page.locator('#logout')).toBeEnabled();
+    await page.unroute('**/session/logout');
+    await page.route('**/session/logout', route => route.fulfill({status: 419, contentType: 'application/json',
+        body: JSON.stringify({message: 'CSRF token mismatch.'})}));
+    await page.locator('#logout').click();
+    await expect(page.locator('#notice')).toContainText('This page has expired. Reload it and try again.');
+    await expect(page.locator('#notice').getByRole('button', {name: 'Reload page'})).toBeVisible();
+    await expect(page.locator('#account')).toHaveText(accountBefore);
+});
+
+test('rate limiting tells the user how long to wait', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('.fixture-card')).toHaveCount(4);
+    await page.route('**/api/v1/fixtures?*', route => route.fulfill({status: 429, headers: {'Retry-After': '12'},
+        contentType: 'application/json', body: JSON.stringify({message: 'Too Many Attempts.'})}));
+    await page.locator('#search').fill('North');
+    await expect(page.locator('#fixtures')).toContainText('Please wait 12 seconds before trying again.');
 });

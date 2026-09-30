@@ -166,4 +166,30 @@ Only the latest eligible completed pre-kickoff forecast in the selected workspac
 
 The browser uses “workspace” for the existing Company relationship. API paths and ownership semantics remain unchanged.
 
-For guided local requests and an importable collection, see [Postman](POSTMAN.md). See [Permissions](PERMISSIONS.md) for role boundaries.
+For all application requests and an importable collection, see [Postman](POSTMAN.md). See [Permissions](PERMISSIONS.md) for role boundaries.
+
+## Catalog filtering and sorting
+
+Fixtures, leagues, teams and providers use Spatie Query Builder. Existing flat filters continue to work. Standard `filter[...]` values take precedence when the same filter is also supplied as a flat parameter.
+
+| Endpoint | Allowed filters | Allowed sorts | Allowed relationship includes |
+| --- | --- | --- | --- |
+| `GET /fixtures` | `q`, `league_id`, `matchday`, `season`, `status`, `upcoming` | `id`, `kickoff_at`, `matchday` | `league`, `homeTeam`, `awayTeam` (already loaded by default) |
+| `GET /leagues` | `name`, `country` | `id`, `name` | None |
+| `GET /teams` | `name`, `league_id` | `id`, `name` | `league` |
+| `GET /providers` | `name`, `driver`, `is_active` | `id`, `name`, `weight` | None; admin access remains required |
+
+```text
+/api/v1/fixtures?filter[q]=Arsenal&filter[matchday]=4&sort=kickoff_at
+/api/v1/fixtures?q=Arsenal&matchday=4&sort=-kickoff_at
+/api/v1/teams?filter[league_id]=1&include=league&sort=name
+/api/v1/providers?filter[is_active]=0&sort=-weight
+```
+
+`q` searches either team's name. Name/country searches are partial matches; IDs, status and other scalar filters are exact. Commas in text searches remain text. Filters accept single scalar values, not arrays. A leading minus reverses sort direction; multiple allowed sorts may be comma-separated. The default order is ascending ID. Pagination links retain filters, sort and includes. Unsupported filter/sort/include names return 400; malformed values and out-of-range pagination return 422. These options do not grant access or permit arbitrary relationship loading.
+
+## Error responses
+
+JSON authentication, authorization, missing-resource and server errors use plain-language messages with their existing HTTP status codes. Validation errors retain the field-keyed `errors` object so forms can place feedback beside each input. Rate-limit responses retain `Retry-After`. Business conflicts retain the specific reason for the rejected operation. Unexpected server errors omit exception classes, database details and stack traces from JSON, including in debug mode; server-side reporting remains enabled.
+
+The dashboard treats a 401 during sign-out as an already-ended session and clears cached account/workspace content. Other private-request 401s clear that content and offer sign-in. A 419 prompts a page reload; network/server errors do not falsely claim successful sign-out. The top-right control is labeled Sign out.

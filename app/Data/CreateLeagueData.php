@@ -3,6 +3,7 @@
 namespace App\Data;
 
 use Spatie\LaravelData\Data;
+use Spatie\LaravelData\Support\Validation\ValidationContext;
 
 class CreateLeagueData extends Data
 {
@@ -11,7 +12,7 @@ class CreateLeagueData extends Data
         public string $country,
     ) {}
 
-    public static function rules(): array
+    public static function rules(?ValidationContext $context = null): array
     {
         return [
             'name' => ['required', 'string', 'max:100', 'unique:leagues,name'],

@@ -5,6 +5,7 @@ namespace App\Data;
 use App\Data\Concerns\ValidatesFixtureTeams;
 use Spatie\LaravelData\Data;
 use Spatie\LaravelData\Optional;
+use Spatie\LaravelData\Support\Validation\ValidationContext;
 
 class CreateFixtureData extends Data
 {
@@ -18,7 +19,7 @@ class CreateFixtureData extends Data
         public Optional|bool $is_finished = new Optional,
     ) {}
 
-    public static function rules(): array
+    public static function rules(?ValidationContext $context = null): array
     {
         return [
             'league_id' => ['required', 'integer', 'exists:leagues,id'],

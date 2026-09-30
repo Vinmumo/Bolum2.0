@@ -4,6 +4,7 @@ namespace App\Data;
 
 use Illuminate\Validation\Rules\Password;
 use Spatie\LaravelData\Data;
+use Spatie\LaravelData\Support\Validation\ValidationContext;
 
 class ChangePasswordData extends Data
 {
@@ -12,7 +13,7 @@ class ChangePasswordData extends Data
         public string $password,
     ) {}
 
-    public static function rules(): array
+    public static function rules(?ValidationContext $context = null): array
     {
         return [
             'current_password' => ['required', 'string'],

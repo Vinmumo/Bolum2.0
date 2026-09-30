@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\CompanyMember;
+use App\Support\ApiErrorResponse;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -18,6 +19,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias(['company.member' => CompanyMember::class]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        $exceptions->respond(ApiErrorResponse::render(...));
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );

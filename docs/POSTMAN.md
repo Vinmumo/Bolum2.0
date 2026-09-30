@@ -27,7 +27,7 @@ Use Postman Desktop, or the web app with its Desktop Agent so requests can reach
 
 Select **Bolum Local** as the active environment. Its `base_url` is `http://127.0.0.1:8000`, without `/api/v1` or a trailing slash. If Artisan uses another port, change this value. Postman's [import guide](https://learning.postman.com/docs/getting-started/importing-and-exporting/importing-data/) explains the import controls.
 
-Start by sending the numbered folders' requests **one at a time**. The optional integrations need configuration; the isolation check creates a local test account. This is a guided collection, not an unconditional load-test script.
+The collection is named **Bolum API** and contains every application route and HTTP method, including PATCH and DELETE. Send requests in dependency order: login before protected requests, and create a record before updating or deleting it. Integration requests need their server configuration. Re-import both JSON files to get the updated folders and variables; preserve your existing credentials in Postman's current environment values.
 
 ## 3. Login and understand headers
 
@@ -113,3 +113,15 @@ If you get 419 while testing bearer authentication, remove manually added `Origi
 - Track record also needs admin status, membership, league, season and matchday. Select a past gameweek. Missing pre-kickoff predictions remain missing.
 
 Finish with **Logout current owner/admin token** (204). Other tokens issued during testing remain separate; logging out one token does not revoke every user's token. The [API guide](API.md) lists further endpoints, and [Permissions](PERMISSIONS.md) explains their boundaries.
+
+## 8. Catalog CRUD, profile and browser requests
+
+**Catalog CRUD** has a separate `crud_*` set of variables. With an admin token, send Create league, Create home team, Create away team, then Create fixture. Each response saves the ID required by the next request. Read created fixture, Replace fixture fields (PUT), Update fixture kickoff (PATCH), Record final result, and Delete created fixture exercise the full fixture lifecycle. The update examples move only this fixture's kickoff into the past so recording a score is valid. Delete removes the dedicated fixture; prediction history would cause a 409.
+
+Create inactive provider and Update provider use their own saved provider ID and leave it inactive. The API has no DELETE routes for leagues, teams or providers, so none are invented in the collection. Creating these records persists them in your local catalog.
+
+**Profile and account** includes GET/PATCH profile, registration, password change and a login afterward. The profile PATCH changes your current user's name/avatar. The registration request saves a separate `registered_token`; password change uses that account and revokes its tokens, preserving your admin credentials. Login after password change obtains a fresh token.
+
+**Browser sessions and pages** covers `/`, `/profile`, `/up`, `/sanctum/csrf-cookie`, and `/session/login`, `/session/register`, `/session/logout`. Cookies are enabled only for these requests. Open dashboard captures a plain CSRF token from its HTML meta tag; browser POSTs send it in `X-CSRF-TOKEN`, and successful responses refresh the environment value. These routes exercise the same session behavior as the browser UI. API folders keep cookies disabled so bearer-token permission checks remain clear.
+
+The collection also includes fixture filter options, per-fixture prediction history/latest, the provider list, and fixture synchronization. Sample query requests demonstrate both existing flat filters and Spatie `filter[...]`, `sort` and `include` syntax. `PostmanCollectionTest` compares the collection with Laravel's route registry so missing methods fail the automated checks.

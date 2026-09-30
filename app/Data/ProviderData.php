@@ -5,6 +5,7 @@ namespace App\Data;
 use Illuminate\Validation\Rule;
 use Spatie\LaravelData\Data;
 use Spatie\LaravelData\Optional;
+use Spatie\LaravelData\Support\Validation\ValidationContext;
 
 class ProviderData extends Data
 {
@@ -15,7 +16,7 @@ class ProviderData extends Data
         public Optional|bool $is_active = new Optional,
     ) {}
 
-    public static function rules(): array
+    public static function rules(?ValidationContext $context = null): array
     {
         return [
             'name' => ['required', 'string', 'max:100', Rule::unique('providers')->ignore(request()->route('provider'))],

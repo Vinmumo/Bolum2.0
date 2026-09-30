@@ -56,3 +56,7 @@ Passing tests demonstrate the scenarios asserted. They do not establish live pro
 ## Data validation regressions
 
 `DataValidationTest` checks the Spatie HTTP boundary and partial-update semantics: confirmation errors cannot create accounts/credits, forbidden writes stay 403 even with invalid input, team uniqueness is scoped to a league, changing a fixture league checks existing teams, optional false is preserved while explicit null is rejected, and body fields cannot override idempotency headers. Existing profile, fixture, credit, prediction and browser tests continue to exercise the same API contracts.
+
+`QueryBuilderTest` covers flat/nested filtering, sorting, pagination links, invalid query fields, optional includes, comma-containing searches and admin-only provider reads. `PostmanCollectionTest` checks every application method/route is represented in the collection. The browser search checks exercise typing, blur, clearing and stale responses without pressing Apply filters.
+
+`ApiErrorResponseTest` verifies friendly JSON messages, preserved status codes, validation fields and retry headers, and removal of internal exception details. Browser tests cover an actual server-side logout while the page remains open, subsequent private-request 401s, recoverable CSRF/server failures and rate-limit feedback.

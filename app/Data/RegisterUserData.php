@@ -4,6 +4,7 @@ namespace App\Data;
 
 use Illuminate\Validation\Rules\Password;
 use Spatie\LaravelData\Data;
+use Spatie\LaravelData\Support\Validation\ValidationContext;
 
 class RegisterUserData extends Data
 {
@@ -14,7 +15,7 @@ class RegisterUserData extends Data
         public string $company_name,
     ) {}
 
-    public static function rules(): array
+    public static function rules(?ValidationContext $context = null): array
     {
         return [
             'name' => ['required', 'string', 'max:100'],

@@ -4,6 +4,7 @@ namespace App\Data;
 
 use Illuminate\Validation\Rule;
 use Spatie\LaravelData\Data;
+use Spatie\LaravelData\Support\Validation\ValidationContext;
 
 class UpdateProfileData extends Data
 {
@@ -12,7 +13,7 @@ class UpdateProfileData extends Data
         public string $avatar,
     ) {}
 
-    public static function rules(): array
+    public static function rules(?ValidationContext $context = null): array
     {
         return [
             'name' => ['required', 'string', 'max:100'],

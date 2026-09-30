@@ -86,7 +86,7 @@ Administrators see an Operations workspace with a distinct summary and the exist
 
 `ForecastEligibility` centralizes the identity, timestamp, category and valid-probability rules shared by aggregate Performance and the gameweek track record. `TrackRecordService` starts from all fixtures in one selected round, then scans only that workspace's completed predictions in descending ID order to select the latest eligible forecast per fixture. This preserves missing-forecast rows and distinguishes coverage from accuracy. Reports do not synthesize historical predictions. Administrative visibility does not bypass workspace membership.
 
-The match browser uses catalog-derived round metadata and a 300 ms search debounce. Input changes immediately invalidate previous request IDs, so late responses cannot overwrite the current search. Disabled league selects are explicitly serialized; HTML FormData normally omits disabled controls. Imported leagues take priority over local demo leagues in the selector. Sidebar expansion is a local presentation preference only, never an authorization control.
+The match browser uses catalog-derived round metadata and a 300 ms search debounce. Input changes immediately invalidate previous request IDs, so late responses cannot overwrite the current search. Disabled league selects are explicitly serialized; HTML FormData normally omits disabled controls. Imported leagues take priority over local demo leagues in the selector. The desktop sidebar expands on pointer hover or keyboard focus and collapses when both leave. Touchscreens keep navigation open. This presentation state is not persisted and does not affect authorization.
 
 ## Actions and typed input
 
@@ -105,7 +105,7 @@ app/
   Http/
     Controllers/Api/   JSON API request/response coordination
     Controllers/SessionController.php   Browser cookie/session lifecycle
-    Requests/      ListRequest for read-only query filters
+    Requests/      CatalogQueryRequest/ListRequest for read-only query filters
     Resources/     JSON contracts
   Jobs/            Queued prediction generation and fixture import
   Models/          Persistence, relationships, casts and query scopes
@@ -122,3 +122,11 @@ Data classes extend `Spatie\LaravelData\Data`, with constructor properties and `
 Browser and API registration both call `RegisterUserAction`; it creates the user, owner membership and welcome credit ledger within one transaction. The browser controller establishes the cookie session, while the API controller issues a token. `UserResource` and `AuthSessionResource` preserve the existing JSON shape. Password changes are validated by `ChangePasswordData` and passed to `ChangePasswordAction`; the Action verifies the current password and revokes stored access, then the controller invalidates the current HTTP session.
 
 Pure prediction mathematics and external-provider adapters remain Services. The `GeneratePrediction` job preserves its serialized company/prediction IDs and guarded terminal transitions. This separation changes PHP class locations and callers, not API URLs, database schema, membership rules or response fields.
+
+## Catalog query construction
+
+`CatalogQueryRequest` extends `ListRequest` and validates scalar flat/nested filters, sorting and include parameter shape. `forQueryBuilder()` maps existing flat parameters into Spatie's `filter` object while preserving explicit nested values. FixtureController and CatalogController use `QueryBuilder::for()`, `allowedFilters()`, `allowedSorts()` and `allowedIncludes()`, then paginate and append the original query. Version 7 takes variadic arguments; arrays are passed with `...`.
+
+Fixture team-name search groups home/away relationship conditions inside one WHERE clause so other filters still apply. Public fixture relationships remain eager-loaded. Teams can request `include=league`; Resources still control response fields. Provider lists retain the admin Gate. Company-owned prediction/credit listings retain their existing relationship-scoped queries.
+
+Dashboard search listens to input/change events, waits 300 ms between edits, clears immediately, and ignores incomplete IME composition. Request IDs prevent previous searches overwriting newer results. The script URL includes its modification time so browser caches refresh when the asset changes.

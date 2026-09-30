@@ -42,7 +42,7 @@ This command preserves prediction history, recorded results, and existing credit
 
 ## In the dashboard
 
-The dashboard opens in a charcoal dark theme with teal accents and an expandable sidebar. The sidebar starts expanded; its toggle remembers your preference. The header's theme switch saves your light/dark preference locally. Match shortcuts select upcoming, live, or finished fixtures; Reset restores the default upcoming view. Mobile fixtures use full-width cards, and loading/error states, dialogs, and charts follow the selected theme.
+The dashboard opens in a charcoal dark theme with teal accents and an expandable sidebar. On desktop, the sidebar expands on hover or keyboard navigation and collapses when you leave. Touchscreen navigation stays open. The header's theme switch saves your light/dark preference locally. Match shortcuts select upcoming, live, or finished fixtures; Reset restores the default upcoming view. Mobile fixtures use full-width cards, and loading/error states, dialogs, and charts follow the selected theme.
 
 Imported teams display their real crests on fixture cards and match details. Crests come from the football-data.org feed and load from its public image CDN, with initials as a fallback for missing or unavailable artwork. After updating, run `php artisan migrate` and `php artisan fixtures:sync` to populate existing teams' crest URLs.
 
@@ -193,4 +193,4 @@ Use the [Postman walkthrough and collection](docs/POSTMAN.md) to test endpoints,
 
 ## Backend organization
 
-API controllers live in `app/Http/Controllers/Api`. Spatie Laravel Data classes validate and carry mutation inputs, controllers enforce policies/gates, and Actions implement individual operations with transactions where needed. ListRequest validates catalog query filters. Services hold prediction calculations, reporting and provider integrations; Jobs run background workflows. See [Architecture](docs/ARCHITECTURE.md#actions-and-typed-input) and [Development](docs/DEVELOPMENT.md).
+API controllers live in `app/Http/Controllers/Api`. Spatie Laravel Data classes validate and carry mutation inputs, controllers enforce policies/gates, and Actions implement individual operations with transactions where needed. CatalogQueryRequest validates list filters; Spatie Query Builder applies allowed filters, sorts and includes. Services hold prediction calculations, reporting and provider integrations; Jobs run background workflows. See [Architecture](docs/ARCHITECTURE.md#actions-and-typed-input) and [Development](docs/DEVELOPMENT.md).

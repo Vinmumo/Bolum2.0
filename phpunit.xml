@@ -32,5 +32,9 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
+        <env name="FOOTBALL_DATA_TOKEN" value="" force="true"/>
+        <env name="FOOTBALL_GATEWAY_TOKEN" value="" force="true"/>
+        <env name="FOOTBALL_GATEWAY_URL" value="" force="true"/>
+        <env name="FOOTBALL_SYNC_ENABLED" value="false" force="true"/>
     </php>
 </phpunit>

@@ -10,11 +10,14 @@ use App\Models\League;
 use App\Models\Team;
 use App\Models\User;
 use App\Services\FixtureImporter;
+use App\Services\ProviderHttpClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Sleep;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -182,5 +185,87 @@ class FixtureSyncTest extends TestCase
         } catch (ProviderUnavailable) {
             $this->assertDatabaseCount('fixtures', 0);
         }
+    }
+
+    /** A distinct competition id per code, so each import creates its own league. */
+    private function competitionPayload(string $code): array
+    {
+        $data = $this->payload();
+        $data['competition'] = ['id' => crc32($code) % 100000 + 1, 'name' => 'League '.$code];
+        foreach ($data['matches'] as &$match) {
+            $match['id'] = crc32($code.$match['id']) % 1000000 + 1;
+        }
+
+        return $data;
+    }
+
+    public function test_every_configured_competition_is_imported_into_its_own_league(): void
+    {
+        config(['football.data_token' => 'secret', 'football.competitions' => ['PL', 'PD', 'SA']]);
+        Http::fake(fn ($request) => Http::response($this->competitionPayload(explode('/', parse_url($request->url(), PHP_URL_PATH))[3])));
+        $this->assertSame(6, app(FixtureImporter::class)->run());
+        $this->assertSame(['League PD', 'League PL', 'League SA'], League::orderBy('name')->pluck('name')->all());
+        $this->assertDatabaseCount('fixtures', 6);
+        Http::assertSentCount(3);
+    }
+
+    public function test_one_failing_competition_does_not_block_the_others(): void
+    {
+        config(['football.data_token' => 'secret', 'football.competitions' => ['PL', 'PD']]);
+        Http::fake(fn ($request) => str_contains($request->url(), '/PD/') ? Http::response([], 500) : Http::response($this->competitionPayload('PL')));
+        try {
+            app(FixtureImporter::class)->run();
+            $this->fail('Expected the failed competition to be reported.');
+        } catch (ProviderUnavailable $error) {
+            $this->assertStringContainsString('PD', $error->getMessage());
+        }
+        $this->assertSame(['League PL'], League::pluck('name')->all());
+        $this->assertDatabaseCount('fixtures', 2);
+    }
+
+    public function test_recent_sync_requests_only_a_window_around_today_and_keeps_the_country(): void
+    {
+        config(['football.data_token' => 'secret']);
+        $data = $this->payload();
+        Http::fake(function () use (&$data) {
+            return Http::response($data);
+        });
+        app(FixtureImporter::class)->run();
+        Cache::flush();
+        $data['matches'] = [];
+        $this->assertSame(0, app(FixtureImporter::class)->run(recent: true));
+        Http::assertSent(fn ($r) => ($r->data()['dateFrom'] ?? null) === now()->subDays(3)->toDateString()
+            && ($r->data()['dateTo'] ?? null) === now()->addDays(14)->toDateString() && ! isset($r->data()['season']));
+        $this->assertSame('England', League::firstOrFail()->country);
+    }
+
+    public function test_backfill_imports_the_season_before_the_providers_current_one(): void
+    {
+        config(['football.data_token' => 'secret']);
+        Http::fake([
+            'api.football-data.org/v4/competitions/PL' => Http::response(['currentSeason' => ['startDate' => '2026-08-21']]),
+            'api.football-data.org/v4/competitions/PL/matches*' => Http::response($this->payload()),
+        ]);
+        $this->artisan('fixtures:backfill')->assertSuccessful();
+        Http::assertSent(fn ($r) => str_contains($r->url(), '/PL/matches') && ($r->data()['season'] ?? null) === 2025);
+        $this->assertDatabaseCount('fixtures', 2);
+        $this->artisan('fixtures:sync', ['--season' => '25'])->assertFailed();
+    }
+
+    public function test_provider_budget_makes_background_work_wait_and_web_requests_fail_fast(): void
+    {
+        Sleep::fake(syncWithCarbon: true);
+        config(['football.data_token' => 'secret', 'football.competitions' => ['A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7', 'A8', 'A9']]);
+        Http::fake(fn ($request) => Http::response($this->competitionPayload(explode('/', parse_url($request->url(), PHP_URL_PATH))[3])));
+        // The ninth call exceeds the 8/minute budget; the sync waits instead of hitting the upstream limit.
+        $this->assertSame(18, app(FixtureImporter::class)->run());
+        Sleep::assertSleptTimes(1);
+        Http::assertSentCount(9);
+        $this->expectException(ProviderUnavailable::class);
+        $this->expectExceptionMessage('Try again in a minute');
+        for ($i = 0; $i < 8; $i++) {
+            RateLimiter::hit('provider-budget:football-data', 60);
+        }
+        app(ProviderHttpClient::class)->get('football-data', 'standings', 'https://api.football-data.org/v4/competitions/1/standings', [], [], fn ($d) => $d);
     }
 }

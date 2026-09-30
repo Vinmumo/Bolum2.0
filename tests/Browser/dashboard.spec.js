@@ -657,3 +657,18 @@ test('expanding the sidebar on hover overlays the content without shifting it', 
     await expect(page.locator('.sidebar')).toHaveCSS('width','230px');
     expect((await page.locator('.main-shell').boundingBox()).x).toBe(before.x);
 });
+
+test('ratings-model evidence explains opponent-adjusted ratings', async ({ page }) => {
+    const fixture = {id:101,league:{id:2,name:'Premier League'},home_team:{name:'Arsenal FC'},away_team:{name:'Liverpool FC'},kickoff_at:new Date(Date.now()+86400000).toISOString(),status:'scheduled',is_finished:false,source:'football-data',score:{home:null,away:null}};
+    const evidence = {league_matches:120,home_matches:12,away_matches:11,home_attack:1.234,home_defence:0.812,away_attack:1.1,away_defence:0.9,rho:-0.08,limited_sample:false,model_version:'results-ratings-v2',cutoff_at:new Date().toISOString()};
+    const result = {model:'dixon-coles-v1',rho:-0.08,data_quality:'external',expected_goals:{home:1.6,away:1.1},most_likely_score:{home:1,away:1},probabilities:{home_win:.5,draw:.27,away_win:.23},sources:[{name:'Match Results Model',driver:'results',weight:1,expected_goals:{home:1.6,away:1.1},probabilities:{home_win:.5,draw:.27,away_win:.23},evidence}]};
+    await page.route('**/api/v1/fixtures?*', route => route.fulfill({json:{data:[fixture],meta:{total:1,current_page:1,last_page:1},links:{prev:null,next:null}}}));
+    await page.route('**/api/v1/fixtures/101', route => route.fulfill({json:{data:fixture,form:{cutoff_at:new Date().toISOString(),home:[],away:[]}}}));
+    await page.route('**/api/v1/companies/*/fixtures/101/predictions?*', route => route.fulfill({json:{data:[{id:101,status:'completed',created_at:new Date().toISOString(),result}]}}));
+    await signIn(page);
+    await page.locator('[data-fixture]').first().click();
+    await expect(page.locator('.model-evidence')).toContainText('attack 1.23, defence 0.81');
+    await expect(page.locator('.model-evidence')).toContainText('goals against strong defences count for more');
+    await expect(page.locator('.model-evidence')).not.toContainText('undefined');
+    await expect(page.locator('.model-evidence')).not.toContainText('Limited');
+});

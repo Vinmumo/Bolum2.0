@@ -42,7 +42,7 @@ Actions own individual application operations and their transaction boundaries. 
 
 SQLite makes setup easy. Local tests verify transaction rollback and database constraints but do not simulate simultaneous MySQL/PostgreSQL requests. MySQL CI checks engine compatibility, not a full contention workload. Production load and race testing remain follow-up work.
 
-The independent Poisson assumption does not model correlated scores. The results provider estimates simple venue-specific attack/defence rates; it does not incorporate shot quality, injuries, lineups, or a fitted opponent-strength model. Parameters have not been tuned or calibrated against outcomes. Prospective evaluation is available, but its presence does not establish forecast accuracy. The separate sample provider remains synthetic.
+The calculator models low-score dependence with a Dixon-Coles adjustment but otherwise treats goal counts as independent. The results provider fits opponent-adjusted attack/defence ratings; it does not incorporate shot quality, injuries or lineups. Its half-life and prior have not been tuned; a one-season backtest is in [Prediction model](PREDICTIONS.md#backtest). Prospective evaluation is available, but its presence does not establish forecast accuracy. The separate sample provider remains synthetic.
 
 ## Browser client
 
@@ -56,7 +56,7 @@ The client guards company changes so stale responses cannot render another compa
 
 `FixtureImporter` consumes a single configured competition from football-data.org, validates the batch, and performs domain writes in one transaction. A shared lock serializes imports. Stable source/external-ID keys make repeated imports safe. Team mappings include competition context to fit Bolum's league-to-team relationship. Upstream state distinguishes scheduled, live, finished, postponed, and cancelled matches. Only finished matches have final scores imported. No rows are deleted simply because an upstream response omits them.
 
-Imports are synchronous through `fixtures:sync` and queued through the admin endpoint. They do not replace the expected-goals gateway contract. Credentials and scheduling are opt-in; synthetic predictions continue to be labeled synthetic even when the fixture itself came from a live feed.
+Imports are synchronous through `fixtures:sync`/`fixtures:backfill` and queued through the admin endpoint. Each configured competition imports in its own transaction under its own lock. `ProviderHttpClient` enforces a shared per-minute upstream budget (8 football-data.org calls): background callers wait, web callers fail fast. The database queue's `retry_after` (360s) exceeds the sync job's 300s timeout, so a long multi-competition sync is never started twice. They do not replace the expected-goals gateway contract. Credentials and scheduling are opt-in; synthetic predictions continue to be labeled synthetic even when the fixture itself came from a live feed.
 
 ## Evaluation boundary
 
@@ -68,7 +68,7 @@ This is prospective forecast evaluation, not historical feature reconstruction. 
 
 `MatchHistory` centralizes the chronological rules shared by form and model inputs. Eligible matches have imported final scores in the same league, kickoff within 365 days, and result observation/update at or before the cutoff. Past detail views use their kickoff as the cutoff. A past result imported today cannot be used to claim a forecast could have known it earlier. Mutable fixture rows are not a historical feature store; corrections can remove an entry from a past form view. Already accepted forecast snapshots are unaffected.
 
-`ResultsFootballProvider` loads at most 1,000 eligible rows, requires minimum league/team samples, and produces deterministic inputs using recency weights and smoothed venue rates. `RequestPredictionAction` freezes these database-derived inputs before debiting within its transaction. The bounded database calculation performs no network I/O while the company is locked. The job later consumes only frozen inputs. HTTP drivers still make their calls outside that transaction. A provider failure never silently substitutes synthetic inputs.
+`ResultsFootballProvider` loads at most 1,000 eligible rows, requires minimum league/team samples, and produces deterministic inputs by fitting recency-weighted, prior-smoothed team ratings and a low-score `rho`. `RequestPredictionAction` freezes these database-derived inputs before debiting within its transaction. The bounded database calculation performs no network I/O while the company is locked. The job later consumes only frozen inputs. HTTP drivers still make their calls outside that transaction. A provider failure never silently substitutes synthetic inputs.
 
 `StandingsService` validates the official TOTAL table, caches it for ten minutes, and uses a shared cache lock to avoid duplicate upstream calls on concurrent cache misses. Public reads have an IP rate limit. Source errors are safe/recoverable, and telemetry uses the existing sanitized logger. Historical-season tables may omit earlier administrative deductions; current tables preserve upstream points. Standings are display context and do not enter the forecast model, avoiding accidental use of today's table for earlier predictions.
 

@@ -4,7 +4,7 @@ Bolum combines a Laravel 13 API with a responsive dashboard for fixtures, compan
 
 ## Start locally
 
-Requires **PHP 8.4+**, Composer, and PDO SQLite. The dashboard is served directly by Laravel, so **no frontend build is needed to run it**.
+Requires **PHP 8.4.1+**, Composer, and PDO SQLite. The dashboard is served directly by Laravel, so **no frontend build is needed to run it**.
 
 From the project directory, these commands work in Bash and Windows PowerShell:
 
@@ -13,7 +13,7 @@ composer setup
 php artisan serve
 ```
 
-Setup installs the locked dependencies, creates `.env` and the SQLite file if missing, generates a key only when absent, and migrates/seeds without resetting existing data. It is intended for local use. For Windows/Herd, select PHP 8.4+ for this project and confirm that terminal `php -v` uses that version.
+Setup installs the locked dependencies, creates `.env` and the SQLite file if missing, generates a key only when absent, and migrates/seeds without resetting existing data. It is intended for local use. For Windows/Herd, select PHP 8.4.1+ for this project and confirm that terminal `php -v` uses that version.
 
 For manual steps, MySQL configuration and migration troubleshooting, see [Installation guide](docs/INSTALLATION.md). MySQL should use **8.0/8.4, InnoDB and pages of at least 16 KB**; new tables explicitly use DYNAMIC row format. The default SQLite setup avoids MySQL server-configuration differences.
 
@@ -51,7 +51,7 @@ Imported teams display their real crests on fixture cards and match details. Cre
 - **Match analysis:** win/draw/loss probabilities, expected goals, the most likely score, five likely scorelines, goal-total probabilities, both-teams-to-score probability, and each provider's contribution.
 - **League table:** official standings with club crests, points, goals, season and fetch time. Tables are cached for ten minutes and have loading/retry states.
 - **Recent form:** up to five recorded results for each team, with venue and scores from that team’s perspective.
-- **Performance:** accuracy, multiclass Brier score, log loss, and confidence calibration against recorded results. Sample, mixed, and external inputs are reported separately.
+- **Performance:** accuracy, multiclass Brier score, log loss, and confidence calibration against recorded results, compared with equal-chance and league base-rate forecasts. Sample, mixed, and external inputs are reported separately.
 - **My profile:** open `/profile` or select your avatar to edit your display name and choose a football avatar. Email is read-only. Password changes require your current password and confirmation, revoke API tokens, clear database sessions, and ask you to sign in again.
 - **Operations (admin only):** a navy-and-amber control room, separate from the teal football workspace, with active-provider counts, pending/stale requests, recent failures, imported-fixture totals, provider configuration, telemetry and sync controls. Counts describe stored work; they do not claim a worker is online. Its Gameweek track record compares saved pre-kickoff forecasts with final scores, shows correct/evaluated counts and outcome accuracy, and marks missing forecasts explicitly.
 
@@ -67,7 +67,8 @@ The importer integrates with the [football-data.org competition matches endpoint
 
 ```dotenv
 FOOTBALL_DATA_TOKEN=your-token
-FOOTBALL_COMPETITION=PL
+# One or more football-data.org codes, e.g. PL,PD,SA,BL1,FL1 (the free plan covers 12 competitions).
+FOOTBALL_COMPETITIONS=PL
 # Optional starting year; leave blank for the provider's current season.
 FOOTBALL_SEASON=
 FOOTBALL_SYNC_ENABLED=false
@@ -78,7 +79,10 @@ Then run:
 ```bash
 php artisan config:clear
 php artisan fixtures:sync
+php artisan fixtures:backfill
 ```
+
+`fixtures:backfill` imports the season before each competition's current one, so the results model has a full year of history from the first week of a new season. `fixtures:sync --season=2024` imports any specific season; `fixtures:sync --recent` fetches only matches from 3 days ago to 14 days ahead.
 
 Reload the dashboard after the first import. It will select the imported league and show its next scheduled matches in kickoff order. Real team names and dates come from the feed; `demo:refresh` only prepares local sample fixtures. Keep the scheduler running for hourly updates when synchronization is enabled. After changing provider configuration in `.env`, restart existing queue workers so queued imports use the new settings.
 
@@ -86,7 +90,9 @@ Alternatively, an administrator can select **Sync fixtures** in Operations; that
 
 Live provider access depends on your token and competition permissions. Tests use fake HTTP responses; no live credentials are required for local development. Synchronization does not import historical model inputs or replay past predictions.
 
-For hourly synchronization, set `FOOTBALL_SYNC_ENABLED=true`, then run the scheduler:
+Each competition is one upstream call. Bolum keeps football-data.org calls within a shared budget of 8 per minute (the free plan allows 10): background syncs wait for the budget, while web requests such as standings return a retryable "busy" error. If one competition fails, the others are still imported and the failure is reported. `FOOTBALL_COMPETITION` (singular) is still read when `FOOTBALL_COMPETITIONS` is blank.
+
+For scheduled synchronization, set `FOOTBALL_SYNC_ENABLED=true`, then run the scheduler. It runs a recent-window sync every hour and a full-season sync daily at 03:30:
 
 ```bash
 php artisan schedule:work
@@ -102,7 +108,7 @@ php artisan predictions:use-results
 
 This checks the earliest upcoming imported fixture, enables the `results` provider, and pauses synthetic providers. Existing HTTP providers keep their settings. The command is repeatable. Each prediction also checks its own teams: it needs at least **20 completed league matches and 3 matches per team** recorded within the last year. Insufficient history returns a clear conflict before charging a credit; no synthetic fallback is used.
 
-The model estimates scoring rates from imported final scores using home/away attack and defence, a 90-day recency half-life, and five equivalent league-average matches to stabilize small venue samples. It then feeds Bolum's independent Poisson calculator. These are score-based expected goals, **not shot-based xG**. Estimates, counts, source fixture IDs, cutoff time, parameters and model version are frozen when the request is accepted. Workers use that snapshot even if results are corrected later.
+The model fits opponent-adjusted attack and defence ratings for every team from imported final scores, with a 90-day recency half-life and five league-average matches to stabilize small samples. Bolum's calculator then applies a Dixon-Coles adjustment, fitted per league, so 0-0 and 1-1 draws are not under-predicted. In a walk-forward backtest on the 2025-26 Premier League it beat the previous model and naive baselines; see [Prediction model](docs/PREDICTIONS.md#backtest). These are score-based expected goals, **not shot-based xG**. Estimates, counts, source fixture IDs, cutoff time, parameters and model version are frozen when the request is accepted. Workers use that snapshot even if results are corrected later.
 
 Open a match to see recent form and generate a new forecast. Existing synthetic forecasts stay labeled sample; enabling a new provider does not rewrite history. The dashboard shows the match counts and a limited-history message when either venue sample has fewer than five matches. The API categorizes a results-only prediction as `external` (shown as Real data in the dashboard). This describes the input source, not demonstrated accuracy.
 

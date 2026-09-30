@@ -9,8 +9,10 @@ use App\Models\Company;
 use App\Models\Fixture;
 use App\Models\Prediction;
 use App\Models\User;
+use App\Services\PerformanceService;
 use App\Services\PredictionCalculator;
 use App\Services\Providers\HttpFootballProvider;
+use Closure;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -70,6 +72,20 @@ class AnalyticsTest extends TestCase
         $expected = ($probs['home_win'] - 1) ** 2 + $probs['draw'] ** 2 + $probs['away_win'] ** 2;
         $this->assertEqualsWithDelta($expected, $r->json('data.brier_score'), 1e-12);
         $this->assertEqualsWithDelta(-log($probs['home_win']), $r->json('data.log_loss'), 1e-12);
+        // With one fixture the leave-one-out base rate has no other outcomes, so it equals equal chances.
+        $this->assertEqualsWithDelta(2 / 3, $r->json('data.baselines.uniform.brier_score'), 1e-12);
+        $this->assertEqualsWithDelta(log(3), $r->json('data.baselines.base_rate.log_loss'), 1e-12);
+        $this->assertEqualsWithDelta(1 - $expected / (2 / 3), $r->json('data.brier_skill'), 1e-12);
+    }
+
+    public function test_base_rate_baseline_never_sees_the_outcome_it_is_scored_against(): void
+    {
+        $baselines = Closure::bind(fn (array $outcomes) => $this->baselines($outcomes), app(PerformanceService::class), PerformanceService::class);
+        // For each home win, the other outcomes are one home win and one draw: smoothed (1+1, 1+1, 0+1) / 5.
+        // For the draw, the others are two home wins: (2+1, 0+1, 0+1) / 5.
+        $r = $baselines(['home_win', 'home_win', 'draw']);
+        $this->assertEqualsWithDelta(-(2 * log(2 / 5) + log(1 / 5)) / 3, $r['base_rate']['log_loss'], 1e-12);
+        $this->assertSame(['brier_score' => null, 'log_loss' => null], $baselines([])['uniform']);
     }
 
     public function test_results_and_reports_enforce_authorization_and_temporal_rules(): void

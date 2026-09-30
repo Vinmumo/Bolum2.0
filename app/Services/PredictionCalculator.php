@@ -17,12 +17,14 @@ class PredictionCalculator
         $away = 0;
         $weight = 0;
         $sources = [];
+        // A league-fitted low-score dependence (results model v2) replaces the default for the whole forecast.
+        $rho = (float) ($fixture['results_inputs']['rho'] ?? PoissonCalculator::DEFAULT_RHO);
         foreach ($providers as $provider) {
             $driver = match ($provider['driver']) {
                 'sample' => $this->sample,'http' => $this->http,'results' => $this->results,default => throw new ProviderUnavailable('Unsupported provider.')
             };
             $goals = $driver->expectedGoals($fixture);
-            $result = $this->poisson->calculate($goals['home'], $goals['away']);
+            $result = $this->poisson->calculate($goals['home'], $goals['away'], $rho);
             $sources[] = ['id' => $provider['id'] ?? null, 'name' => $provider['name'] ?? $provider['driver'], 'driver' => $provider['driver'], 'weight' => (float) $provider['weight'], 'expected_goals' => $goals, 'probabilities' => $result['probabilities']];
             if ($provider['driver'] === 'results') {
                 $sources[array_key_last($sources)]['evidence'] = $fixture['results_inputs'];
@@ -36,6 +38,6 @@ class PredictionCalculator
         }
         $sampleCount = count(array_filter($sources, fn ($s) => $s['driver'] === 'sample'));
 
-        return [...$this->poisson->calculate($home / $weight, $away / $weight), 'sources' => $sources, 'data_quality' => $sampleCount === count($sources) ? 'sample' : ($sampleCount ? 'mixed' : 'external')];
+        return [...$this->poisson->calculate($home / $weight, $away / $weight, $rho), 'sources' => $sources, 'data_quality' => $sampleCount === count($sources) ? 'sample' : ($sampleCount ? 'mixed' : 'external')];
     }
 }

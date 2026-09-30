@@ -16,6 +16,7 @@ class PerformanceService
         $brier = 0;
         $logLoss = 0;
         $recent = [];
+        $outcomes = [];
         $buckets = [];
         for ($i = 0; $i < 5; $i++) {
             $buckets[] = ['label' => ($i * 20).'–'.(($i + 1) * 20).'%', 'count' => 0, 'confidence' => 0.0, 'accuracy' => 0.0];
@@ -24,7 +25,7 @@ class PerformanceService
         // Filter quality in PHP for consistent JSON behavior across database engines.
         $seen = [];
         $company->predictions()->where('status', 'completed')->whereNotNull('completed_at')->whereHas('fixture', fn ($q) => $q->where('is_finished', true)->whereNotNull('home_goals')->whereNotNull('away_goals'))
-            ->with('fixture')->orderByDesc('id')->chunkByIdDesc(200, function ($predictions) use (&$count, &$correct, &$brier, &$logLoss, &$recent, &$buckets, &$seen, $quality) {
+            ->with('fixture')->orderByDesc('id')->chunkByIdDesc(200, function ($predictions) use (&$count, &$correct, &$brier, &$logLoss, &$recent, &$buckets, &$seen, &$outcomes, $quality) {
                 foreach ($predictions as $p) {
                     $f = $p->fixture;
                     $probs = $this->eligibility->probabilities($p, $f, $quality);
@@ -33,6 +34,7 @@ class PerformanceService
                     }
                     $seen[$f->id] = true;
                     $actual = $f->home_goals > $f->away_goals ? 'home_win' : ($f->home_goals === $f->away_goals ? 'draw' : 'away_win');
+                    $outcomes[] = $actual;
                     $pick = array_keys($probs, max($probs), true)[0];
                     $hit = $pick === $actual;
                     $confidence = max($probs);
@@ -58,6 +60,40 @@ class PerformanceService
             }
         }
 
-        return ['quality' => $quality, 'count' => $count, 'accuracy' => $count ? $correct / $count : null, 'brier_score' => $count ? $brier / $count : null, 'log_loss' => $count ? $logLoss / $count : null, 'calibration' => $buckets, 'recent' => $recent, 'method' => 'Latest completed pre-kickoff prediction per fixture within the selected data category.'];
+        $baselines = $this->baselines($outcomes);
+
+        return ['quality' => $quality, 'count' => $count, 'accuracy' => $count ? $correct / $count : null, 'brier_score' => $count ? $brier / $count : null, 'log_loss' => $count ? $logLoss / $count : null,
+            'baselines' => $baselines, 'brier_skill' => $count && $baselines['base_rate']['brier_score'] > 0 ? 1 - ($brier / $count) / $baselines['base_rate']['brier_score'] : null, 'calibration' => $buckets, 'recent' => $recent, 'method' => 'Latest completed pre-kickoff prediction per fixture within the selected data category.'];
+    }
+
+    /**
+     * Naive forecasts scored on the same fixtures. The base rate for each fixture uses the other evaluated
+     * outcomes (leave-one-out, add-one smoothed), so it never sees the result it is scored against.
+     */
+    private function baselines(array $outcomes): array
+    {
+        $n = count($outcomes);
+        $score = function (callable $forecast) use ($outcomes, $n) {
+            if (! $n) {
+                return ['brier_score' => null, 'log_loss' => null];
+            }
+            [$brier, $logLoss] = [0.0, 0.0];
+            foreach ($outcomes as $actual) {
+                $probs = $forecast($actual);
+                foreach ($probs as $outcome => $prob) {
+                    $brier += ($prob - ($outcome === $actual ? 1 : 0)) ** 2;
+                }
+                $logLoss -= log($probs[$actual]);
+            }
+
+            return ['brier_score' => $brier / $n, 'log_loss' => $logLoss / $n];
+        };
+        $counts = array_merge(['home_win' => 0, 'draw' => 0, 'away_win' => 0], array_count_values($outcomes));
+
+        return [
+            'uniform' => $score(fn () => ['home_win' => 1 / 3, 'draw' => 1 / 3, 'away_win' => 1 / 3]),
+            'base_rate' => $score(fn ($actual) => array_map(fn ($outcome) => ($counts[$outcome] - ($outcome === $actual ? 1 : 0) + 1) / ($n - 1 + 3),
+                ['home_win' => 'home_win', 'draw' => 'draw', 'away_win' => 'away_win'])),
+        ];
     }
 }

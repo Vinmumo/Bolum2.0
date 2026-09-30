@@ -1,5 +1,6 @@
 <?php
 
+use App\Exceptions\ProviderUnavailable;
 use App\Jobs\GeneratePrediction;
 use App\Models\Fixture;
 use App\Models\League;
@@ -25,16 +26,37 @@ Artisan::command('predictions:recover', function () {
 });
 Schedule::command('predictions:recover')->everyFiveMinutes()->withoutOverlapping();
 
-Artisan::command('fixtures:sync', function (FixtureImporter $importer) {
+Artisan::command('fixtures:sync {--recent : Only matches from '.FixtureImporter::RECENT_DAYS_BACK.' days ago to '.FixtureImporter::RECENT_DAYS_AHEAD.' days ahead} {--season= : Season start year, e.g. 2025}', function (FixtureImporter $importer) {
     try {
-        $this->info('Imported '.$importer->run().' fixtures.');
+        $season = $this->option('season');
+        if ($season !== null && ! preg_match('/^\d{4}$/', $season)) {
+            $this->error('Season must be a four-digit start year, e.g. 2025.');
+
+            return 1;
+        }
+        $this->info('Imported '.$importer->run($season === null ? null : (int) $season, (bool) $this->option('recent')).' fixtures.');
+    } catch (ProviderUnavailable $error) {
+        $this->error($error->getMessage().' Check provider credentials and usage records.');
+
+        return 1;
     } catch (Throwable) {
         $this->error('Fixture synchronization failed. Check provider credentials and usage records.');
 
         return 1;
     }
 })->purpose('Import fixtures and final scores from football-data.org');
-Schedule::command('fixtures:sync')->hourly()->withoutOverlapping()->when(fn () => config('football.sync_enabled'));
+// Hourly syncs fetch only nearby matches; a nightly full sync catches any wider schedule changes.
+Schedule::command('fixtures:sync', ['--recent'])->hourly()->withoutOverlapping()->when(fn () => config('football.sync_enabled'));
+Schedule::command('fixtures:sync')->dailyAt('03:30')->withoutOverlapping()->when(fn () => config('football.sync_enabled'));
+Artisan::command('fixtures:backfill', function (FixtureImporter $importer) {
+    try {
+        $this->info('Imported '.$importer->backfillPreviousSeason().' fixtures from the previous season.');
+    } catch (Throwable) {
+        $this->error('Backfill failed. Check provider credentials and usage records.');
+
+        return 1;
+    }
+})->purpose('Import the previous season so the results model has a full year of history');
 Artisan::command('providers:prune', function () {
     $count = ProviderCall::where('created_at', '<', now()->subDays(30))->delete();
     $this->info('Removed '.$count.' old provider records.');

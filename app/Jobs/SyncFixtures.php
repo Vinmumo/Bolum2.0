@@ -13,7 +13,8 @@ class SyncFixtures implements ShouldQueue
 
     public int $tries = 3;
 
-    public int $timeout = 60;
+    /** Several competitions share an 8-call/minute budget, so a full sync can take a few minutes. */
+    public int $timeout = 300;
 
     public function __construct(public int $syncId) {}
 

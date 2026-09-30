@@ -29,7 +29,7 @@ class DatabaseSeeder extends Seeder
             app(TopUpCreditsAction::class)->execute($company, $admin, new TopUpCreditsData(10, 'welcome'));
         }
         $other = Company::firstOrCreate(['name' => 'Rival Analytics']);
-        $league = League::firstOrCreate(['name' => 'Demo Premier League'], ['country' => 'England']);
+        $league = League::firstOrCreate(['name' => 'Demo Premier League', 'source' => null], ['country' => 'England']);
         $teams = [];
         foreach (['North London', 'Manchester Blue', 'Merseyside Red', 'West London'] as $name) {
             $teams[] = Team::firstOrCreate(['league_id' => $league->id, 'name' => $name]);

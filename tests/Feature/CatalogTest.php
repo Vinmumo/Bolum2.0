@@ -52,7 +52,8 @@ class CatalogTest extends TestCase
         $league = League::create(['name' => 'Other', 'country' => 'Kenya']);
         $team = Team::create(['league_id' => $league->id, 'name' => 'Other team']);
         $this->patchJson('/api/v1/fixtures/'.$fixture->id, ['away_team_id' => $team->id])->assertUnprocessable();
-        $this->patchJson('/api/v1/fixtures/'.$fixture->id, ['is_finished' => true])->assertOk()->assertJsonPath('data.is_finished', true);
+        $this->patchJson('/api/v1/fixtures/'.$fixture->id, ['is_finished' => true])->assertUnprocessable()
+            ->assertJsonValidationErrors(['is_finished' => 'Record a final score to finish a fixture.']);
     }
 
     public function test_fixture_list_is_paginated_eager_loaded_and_bounded(): void

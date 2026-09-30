@@ -180,9 +180,19 @@ class PredictionTest extends TestCase
     public function test_recovery_queues_only_stale_pending_work(): void
     {
         $id = $this->requestPrediction()->json('data.id');
+        // The original job's uniqueness lock has expired, e.g. after a worker crash.
+        $this->travel(11)->minutes();
         Prediction::whereKey($id)->update(['created_at' => now()->subMinutes(6)]);
-        Queue::fake();
         $this->artisan('predictions:recover')->assertSuccessful();
+        Queue::assertPushed(GeneratePrediction::class, 2);
+    }
+
+    public function test_recovery_does_not_duplicate_work_that_is_still_queued(): void
+    {
+        $id = $this->requestPrediction()->json('data.id');
+        Prediction::whereKey($id)->update(['created_at' => now()->subMinutes(6)]);
+        $this->artisan('predictions:recover')->assertSuccessful();
+        // Only the original dispatch; its uniqueness lock blocks the recovery duplicate.
         Queue::assertPushed(GeneratePrediction::class, 1);
     }
 }

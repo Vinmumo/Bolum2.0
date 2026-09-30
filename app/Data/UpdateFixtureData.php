@@ -26,7 +26,7 @@ class UpdateFixtureData extends Data
             'home_team_id' => ['sometimes', 'integer', 'exists:teams,id'],
             'away_team_id' => ['sometimes', 'integer', 'exists:teams,id'],
             'kickoff_at' => ['sometimes', 'date'],
-            'is_finished' => ['sometimes', 'boolean'],
+            'is_finished' => ['sometimes', 'boolean', 'declined'],
         ];
     }
 }

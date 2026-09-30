@@ -12,6 +12,7 @@ class RecordFixtureResultAction
     {
         return DB::transaction(function () use ($data, $fixture) {
             $fixture = Fixture::lockForUpdate()->findOrFail($fixture->id);
+            abort_if($fixture->isImported(), 409, 'Imported fixtures are managed by the football-data sync.');
             abort_if($fixture->kickoff_at->isFuture(), 409, 'A future fixture cannot have a final result.');
             abort_if(in_array($fixture->status, ['cancelled', 'postponed']), 409, 'This fixture cannot be finalized in its current state.');
             $fixture->update([...$data->toArray(), 'status' => 'finished', 'is_finished' => true, 'result_recorded_at' => now()]);

@@ -26,7 +26,7 @@ class CreateFixtureData extends Data
             'home_team_id' => ['required', 'integer', 'exists:teams,id'],
             'away_team_id' => ['required', 'integer', 'exists:teams,id'],
             'kickoff_at' => ['required', 'date'],
-            'is_finished' => ['sometimes', 'boolean'],
+            'is_finished' => ['sometimes', 'boolean', 'declined'],
         ];
     }
 }

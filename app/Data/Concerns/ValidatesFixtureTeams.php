@@ -8,6 +8,11 @@ use Illuminate\Validation\Validator;
 
 trait ValidatesFixtureTeams
 {
+    public static function messages(): array
+    {
+        return ['is_finished.declined' => 'Record a final score to finish a fixture.'];
+    }
+
     public static function withValidator(Validator $validator): void
     {
         $validator->after(function (Validator $validator) {

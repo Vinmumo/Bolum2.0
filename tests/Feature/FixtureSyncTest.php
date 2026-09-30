@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Exceptions\ProviderUnavailable;
 use App\Jobs\SyncFixtures;
 use App\Models\FixtureSync;
+use App\Models\League;
 use App\Models\Team;
 use App\Models\User;
 use App\Services\FixtureImporter;
@@ -72,6 +73,18 @@ class FixtureSyncTest extends TestCase
         $this->getJson('/api/v1/fixtures?upcoming=1&league_id='.$league)->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.home_team.name', 'London')->assertJsonPath('data.0.source', 'football-data');
         Http::assertSent(fn ($r) => $r->hasHeader('X-Auth-Token', 'secret') && str_contains($r->url(), '/competitions/PL/matches'));
         Http::assertSentCount(1);
+    }
+
+    public function test_sync_succeeds_when_a_local_league_has_the_same_name(): void
+    {
+        config(['football.data_token' => 'secret']);
+        League::create(['name' => 'Premier League', 'country' => 'England']);
+        Http::fake(['*' => Http::response($this->payload())]);
+        $this->assertSame(2, app(FixtureImporter::class)->run());
+        $this->assertDatabaseHas('leagues', ['name' => 'Premier League', 'source' => 'football-data']);
+        $this->assertSame(2, League::where('name', 'Premier League')->count());
+        Sanctum::actingAs(User::factory()->create(['is_admin' => true]));
+        $this->postJson('/api/v1/leagues', ['name' => 'Premier League', 'country' => 'England'])->assertUnprocessable()->assertJsonValidationErrors('name');
     }
 
     public function test_malformed_batch_is_rejected_before_any_domain_writes(): void

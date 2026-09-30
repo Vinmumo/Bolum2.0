@@ -1,8 +1,30 @@
 name: Tests
-on: [push, pull_request]
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
 permissions:
   contents: read
+# A newer push to the same branch or PR supersedes the run in progress.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check PHP dependencies for known vulnerabilities
+        run: composer audit --locked
+      - name: Check npm dependencies for known vulnerabilities
+        run: npm audit --audit-level=high
   installation:
     runs-on: ${{ matrix.os }}
     strategy:
@@ -52,6 +74,14 @@ jobs:
           php-version: '8.4'
           extensions: mbstring, fileinfo, pdo_sqlite, pdo_mysql
           coverage: none
+      - name: Locate the Composer cache
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: composer-${{ runner.os }}-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-${{ runner.os }}-
       - run: composer install --no-interaction --prefer-dist
       - run: cp .env.example .env
       - run: php artisan key:generate
@@ -78,6 +108,14 @@ jobs:
           php-version: '8.4'
           extensions: mbstring, fileinfo, pdo_sqlite
           coverage: none
+      - name: Locate the Composer cache
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: composer-${{ runner.os }}-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-${{ runner.os }}-
       - uses: actions/setup-node@v4
         with:
           node-version: '22'

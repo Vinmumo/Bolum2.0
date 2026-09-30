@@ -103,15 +103,20 @@ h1 { font-size: clamp(24px,2.3vw,32px); }
 }
 
 /* Reveal desktop labels on hover or keyboard navigation; touch navigation stays open. */
-.sidebar { transition: width 160ms ease, padding 160ms ease; }
+.sidebar { transition: width 160ms ease, padding 160ms ease, box-shadow 160ms ease; }
 .sidebar .nav-item, .sidebar .brand { white-space: nowrap; }
-.main-shell { transition: margin-left 160ms ease; }
 :root[data-sidebar="expanded"] .sidebar { width: 230px; padding: 27px 18px; }
 :root[data-sidebar="expanded"] .sidebar .brand { font-size: 29px; gap: 10px; }
 :root[data-sidebar="expanded"] .sidebar .nav-item { font-size: 13px; width: 100%; justify-content: flex-start; gap: 12px; }
 :root[data-sidebar="expanded"] .sidebar .nav-item span { width: 24px; }
-:root[data-sidebar="expanded"] .main-shell { margin-left: 230px; }
-:root[data-sidebar="expanded"] .topbar { padding-left: 36px; padding-right: 36px; }
+/* Hover expansion overlays the content so the page never shifts; always-open touch navigation reserves its space. */
+@media (min-width: 721px) and (hover: hover) and (pointer: fine) {
+    :root[data-sidebar="expanded"] .sidebar { z-index: 30; box-shadow: 12px 0 32px rgb(0 0 0 / .28); }
+}
+@media (hover: none), (pointer: coarse), (pointer: none) {
+    :root[data-sidebar="expanded"] .main-shell { margin-left: 230px; }
+    :root[data-sidebar="expanded"] .topbar { padding-left: 36px; padding-right: 36px; }
+}
 .filters select:disabled { opacity: .7; cursor: not-allowed; }
 #league-filter-hint { margin-top: -8px; margin-bottom: 22px; }
 #record-filters { align-items: end; }

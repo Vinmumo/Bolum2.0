@@ -115,7 +115,8 @@ test('both themes keep key text readable and mobile cards usable', async ({ page
         });
         for (const result of ratios) expect(result.ratio,`${theme} ${result.selector}`).toBeGreaterThanOrEqual(4.5);
         await page.setViewportSize({width:390,height:844});
-        expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+        // Poll so the sidebar's margin transition can settle after the resize.
+        await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
         expect(await page.locator('.fixture-card').first().evaluate(el=>el.getBoundingClientRect().width)).toBeGreaterThan(300);
         expect(await page.locator('#league-filter').evaluate(el=>el.getBoundingClientRect().width)).toBeGreaterThan(140);
         await page.screenshot({path:`/tmp/bolum-${theme}-mobile.png`,fullPage:true});
@@ -411,8 +412,12 @@ test('prediction requests show progress and an inline recoverable failure',async
 });
 
 
+// Playwright's pointer starts at (0,0), over the sidebar; park it in the content so the sidebar starts collapsed.
+const parkPointer = page => page.mouse.move(700, 400);
+
 test('sidebar opens on hover and closes after leaving even after clicking a navigation item',async({page})=>{
     await page.goto('/');
+    await parkPointer(page);
     await expect(page.locator('#sidebar-toggle')).toHaveCount(0);
     await expect(page.locator('html')).toHaveAttribute('data-sidebar','collapsed');
     await page.locator('.sidebar').hover();
@@ -422,11 +427,13 @@ test('sidebar opens on hover and closes after leaving even after clicking a navi
     await expect(page.locator('html')).toHaveAttribute('data-sidebar','collapsed');
     await page.evaluate(()=>localStorage.setItem('bolum.sidebar','expanded'));
     await page.reload();
+    await parkPointer(page);
     await expect(page.locator('html')).toHaveAttribute('data-sidebar','collapsed');
 });
 
 test('sidebar opens for keyboard navigation and mobile navigation stays visible',async({page})=>{
     await page.goto('/');
+    await parkPointer(page);
     await page.locator('.skip-link').focus();
     await page.keyboard.press('Tab');
     await expect(page.locator('.sidebar .brand')).toBeFocused();
@@ -621,4 +628,32 @@ test('rate limiting tells the user how long to wait', async ({ page }) => {
         contentType: 'application/json', body: JSON.stringify({message: 'Too Many Attempts.'})}));
     await page.locator('#search').fill('North');
     await expect(page.locator('#fixtures')).toContainText('Please wait 12 seconds before trying again.');
+});
+
+test('background polling keeps keyboard focus on an unchanged pending prediction', async ({ page }) => {
+    await signIn(page, 'member@bolum.test');
+    await page.locator('[data-fixture]').first().click();
+    await page.locator('#generate').click();
+    await expect(page.locator('#detail-body')).toContainText('Your prediction is queued');
+    await page.locator('#detail-dialog [data-close]').click();
+    await page.locator('.sidebar [data-tab="predictions"]').click();
+    const button = page.locator('#predictions [data-prediction]').first();
+    await button.focus();
+    // A property, not an attribute: changing the markup would legitimately trigger a re-render.
+    await button.evaluate(el => { el.focusProbe = true; });
+    let polls = 0;
+    page.on('request', request => { if (/\/predictions\?per_page=15/.test(request.url())) polls++; });
+    await expect.poll(() => polls, {timeout:12000}).toBeGreaterThanOrEqual(2);
+    expect(await page.evaluate(() => document.activeElement?.focusProbe)).toBe(true);
+});
+
+test('expanding the sidebar on hover overlays the content without shifting it', async ({ page }) => {
+    await page.goto('/');
+    await parkPointer(page);
+    await expect(page.locator('html')).toHaveAttribute('data-sidebar','collapsed');
+    const before = await page.locator('.main-shell').boundingBox();
+    await page.locator('.sidebar').hover();
+    await expect(page.locator('html')).toHaveAttribute('data-sidebar','expanded');
+    await expect(page.locator('.sidebar')).toHaveCSS('width','230px');
+    expect((await page.locator('.main-shell').boundingBox()).x).toBe(before.x);
 });

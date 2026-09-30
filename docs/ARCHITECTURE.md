@@ -56,7 +56,7 @@ The client guards company changes so stale responses cannot render another compa
 
 `FixtureImporter` consumes a single configured competition from football-data.org, validates the batch, and performs domain writes in one transaction. A shared lock serializes imports. Stable source/external-ID keys make repeated imports safe. Team mappings include competition context to fit Bolum's league-to-team relationship. Upstream state distinguishes scheduled, live, finished, postponed, and cancelled matches. Only finished matches have final scores imported. No rows are deleted simply because an upstream response omits them.
 
-Imports are synchronous through `fixtures:sync` and queued through the admin endpoint. They do not replace the expected-goals gateway contract. Credentials and scheduling are opt-in; synthetic predictions continue to be labeled synthetic even when the fixture itself came from a live feed.
+Imports are synchronous through `fixtures:sync`/`fixtures:backfill` and queued through the admin endpoint. Each configured competition imports in its own transaction under its own lock. `ProviderHttpClient` enforces a shared per-minute upstream budget (8 football-data.org calls): background callers wait, web callers fail fast. The database queue's `retry_after` (360s) exceeds the sync job's 300s timeout, so a long multi-competition sync is never started twice. They do not replace the expected-goals gateway contract. Credentials and scheduling are opt-in; synthetic predictions continue to be labeled synthetic even when the fixture itself came from a live feed.
 
 ## Evaluation boundary
 

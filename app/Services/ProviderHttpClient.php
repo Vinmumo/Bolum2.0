@@ -7,10 +7,18 @@ use App\Models\ProviderCall;
 use Closure;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Sleep;
 
 class ProviderHttpClient
 {
-    public function get(string $source, string $operation, string $url, array $headers, array $query, Closure $normalize, int $ttl = 300, ?string $cacheContext = null): array
+    /** Upstream calls per minute shared by all Bolum processes; football-data.org's free plan allows 10, leaving headroom. */
+    private const BUDGETS = ['football-data' => 8];
+
+    /**
+     * @param  bool  $waitForBudget  Background work waits for the per-minute budget; web requests fail fast so users can retry.
+     */
+    public function get(string $source, string $operation, string $url, array $headers, array $query, Closure $normalize, int $ttl = 300, ?string $cacheContext = null, bool $waitForBudget = false): array
     {
         $key = 'football:http:'.hash('sha256', json_encode([$url, $query, $headers, $cacheContext]));
         if (($cached = Cache::get($key)) !== null) {
@@ -19,6 +27,7 @@ class ProviderHttpClient
             return $cached;
         }
         for ($attempt = 1; $attempt <= 2; $attempt++) {
+            $this->spendBudget($source, $waitForBudget);
             $start = hrtime(true);
             $status = null;
             $category = 'network_error';
@@ -47,6 +56,22 @@ class ProviderHttpClient
             usleep(200000);
         }
         throw new ProviderUnavailable('Football provider unavailable or returned invalid data.');
+    }
+
+    private function spendBudget(string $source, bool $wait): void
+    {
+        if (! isset(self::BUDGETS[$source])) {
+            return;
+        }
+        $key = 'provider-budget:'.$source;
+        while (RateLimiter::tooManyAttempts($key, self::BUDGETS[$source])) {
+            if (! $wait) {
+                $this->record($source, 'budget', 'rate_limited', null, 0, false, 1);
+                throw new ProviderUnavailable('Football provider is busy. Try again in a minute.');
+            }
+            Sleep::for(RateLimiter::availableIn($key) + 1)->seconds();
+        }
+        RateLimiter::hit($key, 60);
     }
 
     private function record(string $source, string $operation, string $status, ?int $httpStatus, int $duration, bool $cached, int $attempt): void

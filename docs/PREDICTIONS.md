@@ -6,8 +6,11 @@ Bolum's `results-ratings-v2` model forecasts from final scores imported through 
 
 ```bash
 php artisan fixtures:sync
+php artisan fixtures:backfill
 php artisan predictions:use-results
 ```
+
+`fixtures:backfill` imports the previous season. Without it, early-season forecasts rest on a few weeks of results and stay close to league average (39 matches versus 359 in the 2026-27 Premier League example).
 
 The second command checks available history, activates the results provider and pauses sample providers. It preserves HTTP provider settings and existing predictions. Keep the queue worker and scheduler running. A fresh installation still starts with the sample provider so the workflow can be explored without a token.
 

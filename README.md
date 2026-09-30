@@ -67,7 +67,8 @@ The importer integrates with the [football-data.org competition matches endpoint
 
 ```dotenv
 FOOTBALL_DATA_TOKEN=your-token
-FOOTBALL_COMPETITION=PL
+# One or more football-data.org codes, e.g. PL,PD,SA,BL1,FL1 (the free plan covers 12 competitions).
+FOOTBALL_COMPETITIONS=PL
 # Optional starting year; leave blank for the provider's current season.
 FOOTBALL_SEASON=
 FOOTBALL_SYNC_ENABLED=false
@@ -78,7 +79,10 @@ Then run:
 ```bash
 php artisan config:clear
 php artisan fixtures:sync
+php artisan fixtures:backfill
 ```
+
+`fixtures:backfill` imports the season before each competition's current one, so the results model has a full year of history from the first week of a new season. `fixtures:sync --season=2024` imports any specific season; `fixtures:sync --recent` fetches only matches from 3 days ago to 14 days ahead.
 
 Reload the dashboard after the first import. It will select the imported league and show its next scheduled matches in kickoff order. Real team names and dates come from the feed; `demo:refresh` only prepares local sample fixtures. Keep the scheduler running for hourly updates when synchronization is enabled. After changing provider configuration in `.env`, restart existing queue workers so queued imports use the new settings.
 
@@ -86,7 +90,9 @@ Alternatively, an administrator can select **Sync fixtures** in Operations; that
 
 Live provider access depends on your token and competition permissions. Tests use fake HTTP responses; no live credentials are required for local development. Synchronization does not import historical model inputs or replay past predictions.
 
-For hourly synchronization, set `FOOTBALL_SYNC_ENABLED=true`, then run the scheduler:
+Each competition is one upstream call. Bolum keeps football-data.org calls within a shared budget of 8 per minute (the free plan allows 10): background syncs wait for the budget, while web requests such as standings return a retryable "busy" error. If one competition fails, the others are still imported and the failure is reported. `FOOTBALL_COMPETITION` (singular) is still read when `FOOTBALL_COMPETITIONS` is blank.
+
+For scheduled synchronization, set `FOOTBALL_SYNC_ENABLED=true`, then run the scheduler. It runs a recent-window sync every hour and a full-season sync daily at 03:30:
 
 ```bash
 php artisan schedule:work

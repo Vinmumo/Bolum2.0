@@ -16,19 +16,84 @@ class FixtureImporter
 {
     public function __construct(private ProviderHttpClient $client) {}
 
-    public function run(): int
+    /** Days either side of today covered by a recent-window sync: settles late results and picks up schedule changes. */
+    public const RECENT_DAYS_BACK = 3;
+
+    public const RECENT_DAYS_AHEAD = 14;
+
+    /**
+     * Import every configured competition. A failure in one competition does not stop the others; it is reported after all have run.
+     *
+     * @param  int|null  $season  Season start year; null uses FOOTBALL_SEASON or the provider's current season.
+     * @param  bool  $recent  Only fetch matches around today, for frequent scheduled syncs.
+     */
+    public function run(?int $season = null, bool $recent = false): int
     {
         if (! config('football.data_token')) {
             throw new ProviderUnavailable('Configure FOOTBALL_DATA_TOKEN before synchronizing.');
         }
+        $season ??= config('football.season') ? (int) config('football.season') : null;
+        $query = match (true) {
+            $season !== null => ['season' => $season],
+            $recent => ['dateFrom' => now()->subDays(self::RECENT_DAYS_BACK)->toDateString(), 'dateTo' => now()->addDays(self::RECENT_DAYS_AHEAD)->toDateString()],
+            default => [],
+        };
+        $imported = 0;
+        $failed = [];
+        foreach ($this->competitions() as $competition) {
+            try {
+                $imported += $this->importCompetition($competition, $query);
+            } catch (ProviderUnavailable $error) {
+                $failed[] = $competition;
+                $firstError ??= $error;
+            }
+        }
+        if ($failed) {
+            throw count($failed) === 1 && count($this->competitions()) === 1 ? $firstError
+                : new ProviderUnavailable('Synchronization failed for '.implode(', ', $failed).'; other competitions were imported.');
+        }
 
-        // A shared lock prevents overlapping imports from the scheduler and admin UI.
-        return Cache::lock('football:fixture-sync', 120)->block(5, function () {
-            $competition = config('football.competition', 'PL');
-            if (! preg_match('/^[A-Z0-9]{1,10}$/', $competition)) {
+        return $imported;
+    }
+
+    /** Import the season before each competition's current one, as reported by the provider. */
+    public function backfillPreviousSeason(): int
+    {
+        if (! config('football.data_token')) {
+            throw new ProviderUnavailable('Configure FOOTBALL_DATA_TOKEN before synchronizing.');
+        }
+        $imported = 0;
+        foreach ($this->competitions() as $competition) {
+            $current = $this->client->get('football-data', 'competition', 'https://api.football-data.org/v4/competitions/'.$competition, ['X-Auth-Token' => config('football.data_token')], [], function ($data) {
+                if (Validator::make(is_array($data) ? $data : [], ['currentSeason.startDate' => 'required|date_format:Y-m-d'])->fails()) {
+                    throw new ProviderUnavailable('Malformed competition response.');
+                }
+
+                return ['season' => (int) substr($data['currentSeason']['startDate'], 0, 4)];
+            }, 3600, waitForBudget: true);
+            $imported += $this->importCompetition($competition, ['season' => $current['season'] - 1]);
+        }
+
+        return $imported;
+    }
+
+    /** @return list<string> */
+    public function competitions(): array
+    {
+        $codes = config('football.competitions') ?: [config('football.competition', 'PL')];
+        foreach ($codes as $code) {
+            if (! is_string($code) || ! preg_match('/^[A-Z0-9]{1,10}$/', $code)) {
                 throw new ProviderUnavailable('Invalid competition code.');
             }
-            $query = config('football.season') ? ['season' => (int) config('football.season')] : [];
+        }
+
+        return array_values(array_unique($codes));
+    }
+
+    private function importCompetition(string $competition, array $query): int
+    {
+        // A per-competition lock prevents overlapping imports from the scheduler and admin UI.
+        return Cache::lock('football:fixture-sync:'.$competition, 120)->block(5, function () use ($competition, $query) {
             $data = $this->client->get('football-data', 'fixtures', 'https://api.football-data.org/v4/competitions/'.$competition.'/matches', ['X-Auth-Token' => config('football.data_token')], $query, function ($data) {
                 $v = Validator::make(is_array($data) ? $data : [], [
                     'competition.id' => 'required|integer|min:1', 'competition.name' => 'required|string|max:100', 'matches' => 'present|array|max:1000',
@@ -55,12 +120,14 @@ class FixtureImporter
                 }
 
                 return $data;
-            }, 60);
+            }, 60, waitForBudget: true);
 
             return DB::transaction(function () use ($data) {
                 $source = 'football-data';
                 $league = League::firstOrNew(['source' => $source, 'external_id' => (string) $data['competition']['id']]);
-                $league->fill(['name' => $data['competition']['name'], 'country' => mb_substr($data['matches'][0]['area']['name'] ?? 'International', 0, 100)])->save();
+                // A recent-window response can be empty; keep the stored country rather than guessing one.
+                $country = $data['matches'][0]['area']['name'] ?? ($league->country ?: 'International');
+                $league->fill(['name' => $data['competition']['name'], 'country' => mb_substr($country, 0, 100)])->save();
                 // Preload existing rows and upsert only changed ones, so a sync is a handful of queries
                 // and updated_at still means "last changed" for match-history cutoffs.
                 $teams = collect();

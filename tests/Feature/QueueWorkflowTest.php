@@ -2,11 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\GeneratePrediction;
 use App\Models\Company;
 use App\Models\Fixture;
 use App\Models\Provider;
 use App\Models\User;
 use Illuminate\Foundation\Testing\DatabaseMigrations;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Laravel\Sanctum\Sanctum;
@@ -49,5 +51,31 @@ class QueueWorkflowTest extends TestCase
         $this->assertDatabaseHas('predictions', ['id' => $id, 'status' => 'failed']);
         $this->assertDatabaseCount('failed_jobs', 1);
         $this->assertSame(10, $company->fresh()->credits);
+    }
+
+    public function test_overlapping_duplicate_is_dropped_without_failing_or_refunding(): void
+    {
+        config(['queue.default' => 'database']);
+        $this->seed();
+        Sanctum::actingAs(User::where('email', 'member@bolum.test')->first());
+        $company = Company::where('name', 'Bolum Demo')->first();
+        $id = $this->postJson('/api/v1/companies/'.$company->id.'/fixtures/'.Fixture::first()->id.'/predictions', [], ['Idempotency-Key' => 'overlap-worker'])->assertAccepted()->json('data.id');
+        $credits = $company->fresh()->credits;
+        // Hold the overlap lock as if another worker were still generating this prediction.
+        $job = new GeneratePrediction($company->id, $id);
+        $lock = Cache::lock($job->middleware()[0]->getLockKey($job), 120);
+        $this->assertTrue($lock->get());
+        try {
+            for ($i = 0; $i < 3; $i++) {
+                DB::table('jobs')->update(['available_at' => now()->timestamp]);
+                $this->artisan('queue:work', ['connection' => 'database', '--once' => true])->assertSuccessful();
+            }
+        } finally {
+            $lock->release();
+        }
+        $this->assertDatabaseHas('predictions', ['id' => $id, 'status' => 'pending']);
+        $this->assertDatabaseCount('jobs', 0);
+        $this->assertDatabaseCount('failed_jobs', 0);
+        $this->assertSame($credits, $company->fresh()->credits);
     }
 }

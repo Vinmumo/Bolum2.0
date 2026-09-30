@@ -104,4 +104,43 @@ class ActionsTest extends TestCase
             ->assertOk()->assertJsonPath('data.score.home', 0)->assertJsonPath('data.score.away', 0)->assertJsonPath('data.status', 'finished');
         $this->assertNotNull($fixture->fresh()->result_recorded_at);
     }
+
+    public function test_fixture_kickoff_with_a_utc_offset_is_stored_as_the_same_instant(): void
+    {
+        $this->seed();
+        Sanctum::actingAs(User::where('email', 'admin@bolum.test')->firstOrFail());
+        $fixture = Fixture::firstOrFail();
+        $id = $this->postJson('/api/v1/fixtures', [...$fixture->only(['league_id', 'home_team_id', 'away_team_id']), 'kickoff_at' => '2030-10-01T18:00:00+03:00'])
+            ->assertCreated()->json('data.id');
+        $this->assertSame('2030-10-01 15:00:00', Fixture::findOrFail($id)->kickoff_at->utc()->format('Y-m-d H:i:s'));
+        $this->patchJson('/api/v1/fixtures/'.$id, ['kickoff_at' => '2030-10-02T12:30:00-04:00'])->assertOk();
+        $this->assertSame('2030-10-02 16:30:00', Fixture::findOrFail($id)->kickoff_at->utc()->format('Y-m-d H:i:s'));
+    }
+
+    public function test_imported_fixtures_cannot_be_edited_deleted_or_scored_locally(): void
+    {
+        $this->seed();
+        Sanctum::actingAs(User::where('email', 'admin@bolum.test')->firstOrFail());
+        $fixture = Fixture::firstOrFail();
+        $fixture->update(['source' => 'football-data', 'external_id' => '500', 'kickoff_at' => now()->subHours(3)]);
+        $message = 'Imported fixtures are managed by the football-data sync.';
+        $this->patchJson('/api/v1/fixtures/'.$fixture->id, ['kickoff_at' => now()->addDay()->toIso8601String()])->assertConflict()->assertJsonPath('message', $message);
+        $this->putJson('/api/v1/fixtures/'.$fixture->id.'/result', ['home_goals' => 1, 'away_goals' => 0])->assertConflict()->assertJsonPath('message', $message);
+        $this->deleteJson('/api/v1/fixtures/'.$fixture->id)->assertConflict()->assertJsonPath('message', $message);
+        $this->assertDatabaseHas('fixtures', ['id' => $fixture->id, 'is_finished' => false, 'home_goals' => null]);
+    }
+
+    public function test_reopening_a_finished_fixture_clears_its_recorded_result(): void
+    {
+        $this->seed();
+        Sanctum::actingAs(User::where('email', 'admin@bolum.test')->firstOrFail());
+        $fixture = Fixture::firstOrFail();
+        $fixture->update(['kickoff_at' => now()->subHours(3)]);
+        $this->putJson('/api/v1/fixtures/'.$fixture->id.'/result', ['home_goals' => 2, 'away_goals' => 1])->assertOk();
+        $this->patchJson('/api/v1/fixtures/'.$fixture->id, ['is_finished' => false])->assertOk()
+            ->assertJsonPath('data.status', 'scheduled')->assertJsonPath('data.score.home', null)->assertJsonPath('data.score.away', null);
+        $this->assertNull($fixture->fresh()->result_recorded_at);
+        $this->postJson('/api/v1/fixtures', [...$fixture->only(['league_id', 'home_team_id', 'away_team_id']), 'kickoff_at' => '2030-01-01T12:00:00Z', 'is_finished' => true])
+            ->assertUnprocessable()->assertJsonValidationErrors('is_finished');
+    }
 }

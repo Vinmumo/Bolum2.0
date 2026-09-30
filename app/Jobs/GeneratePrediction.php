@@ -6,13 +6,14 @@ use App\Enums\PredictionStatus;
 use App\Models\Company;
 use App\Models\Prediction;
 use App\Services\PredictionCalculator;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
-class GeneratePrediction implements ShouldQueue
+class GeneratePrediction implements ShouldBeUnique, ShouldQueue
 {
     use Queueable;
 
@@ -20,7 +21,15 @@ class GeneratePrediction implements ShouldQueue
 
     public int $timeout = 60;
 
+    /** Keeps recovery from queueing duplicates; expires so a crashed worker cannot block recovery forever. */
+    public int $uniqueFor = 600;
+
     public function __construct(public int $companyId, public int $predictionId) {}
+
+    public function uniqueId(): string
+    {
+        return $this->companyId.':'.$this->predictionId;
+    }
 
     public function backoff(): array
     {
@@ -29,7 +38,8 @@ class GeneratePrediction implements ShouldQueue
 
     public function middleware(): array
     {
-        return [(new WithoutOverlapping('prediction:'.$this->companyId.':'.$this->predictionId))->releaseAfter(10)->expireAfter(120)];
+        // A duplicate is dropped rather than released: releases consume attempts and would refund work still running.
+        return [(new WithoutOverlapping('prediction:'.$this->companyId.':'.$this->predictionId))->dontRelease()->expireAfter(120)];
     }
 
     public function handle(PredictionCalculator $calculator): void

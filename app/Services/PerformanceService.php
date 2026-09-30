@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Company;
+use App\Models\MarketOdds;
 use App\Models\Prediction;
 
 class PerformanceService
@@ -17,6 +18,7 @@ class PerformanceService
         $logLoss = 0;
         $recent = [];
         $outcomes = [];
+        $evaluated = [];
         $buckets = [];
         for ($i = 0; $i < 5; $i++) {
             $buckets[] = ['label' => ($i * 20).'–'.(($i + 1) * 20).'%', 'count' => 0, 'confidence' => 0.0, 'accuracy' => 0.0];
@@ -25,7 +27,7 @@ class PerformanceService
         // Filter quality in PHP for consistent JSON behavior across database engines.
         $seen = [];
         $company->predictions()->where('status', 'completed')->whereNotNull('completed_at')->whereHas('fixture', fn ($q) => $q->where('is_finished', true)->whereNotNull('home_goals')->whereNotNull('away_goals'))
-            ->with('fixture')->orderByDesc('id')->chunkByIdDesc(200, function ($predictions) use (&$count, &$correct, &$brier, &$logLoss, &$recent, &$buckets, &$seen, &$outcomes, $quality) {
+            ->with('fixture')->orderByDesc('id')->chunkByIdDesc(200, function ($predictions) use (&$count, &$correct, &$brier, &$logLoss, &$recent, &$buckets, &$seen, &$outcomes, &$evaluated, $quality) {
                 foreach ($predictions as $p) {
                     $f = $p->fixture;
                     $probs = $this->eligibility->probabilities($p, $f, $quality);
@@ -35,6 +37,7 @@ class PerformanceService
                     $seen[$f->id] = true;
                     $actual = $f->home_goals > $f->away_goals ? 'home_win' : ($f->home_goals === $f->away_goals ? 'draw' : 'away_win');
                     $outcomes[] = $actual;
+                    $evaluated[$f->id] = ['probabilities' => $probs, 'actual' => $actual, 'kickoff_at' => $f->kickoff_at];
                     $pick = array_keys($probs, max($probs), true)[0];
                     $hit = $pick === $actual;
                     $confidence = max($probs);
@@ -63,7 +66,7 @@ class PerformanceService
         $baselines = $this->baselines($outcomes);
 
         return ['quality' => $quality, 'count' => $count, 'accuracy' => $count ? $correct / $count : null, 'brier_score' => $count ? $brier / $count : null, 'log_loss' => $count ? $logLoss / $count : null,
-            'baselines' => $baselines, 'brier_skill' => $count && $baselines['base_rate']['brier_score'] > 0 ? 1 - ($brier / $count) / $baselines['base_rate']['brier_score'] : null, 'calibration' => $buckets, 'recent' => $recent, 'method' => 'Latest completed pre-kickoff prediction per fixture within the selected data category.'];
+            'baselines' => $baselines, 'market' => $this->market($evaluated), 'brier_skill' => $count && $baselines['base_rate']['brier_score'] > 0 ? 1 - ($brier / $count) / $baselines['base_rate']['brier_score'] : null, 'calibration' => $buckets, 'recent' => $recent, 'method' => 'Latest completed pre-kickoff prediction per fixture within the selected data category.'];
     }
 
     /**
@@ -95,5 +98,40 @@ class PerformanceService
             'base_rate' => $score(fn ($actual) => array_map(fn ($outcome) => ($counts[$outcome] - ($outcome === $actual ? 1 : 0) + 1) / ($n - 1 + 3),
                 ['home_win' => 'home_win', 'draw' => 'draw', 'away_win' => 'away_win'])),
         ];
+    }
+
+    /**
+     * Bolum versus the bookmaker consensus on the fixtures that have both: the latest odds observed before kickoff.
+     * Odds taken close to kickoff know more than an earlier forecast, so this is a demanding benchmark.
+     */
+    private function market(array $evaluated): ?array
+    {
+        $odds = [];
+        foreach (array_chunk(array_keys($evaluated), 500) as $ids) {
+            MarketOdds::whereIn('fixture_id', $ids)->orderByDesc('observed_at')->orderByDesc('id')->get()
+                ->each(function (MarketOdds $snapshot) use (&$odds, $evaluated) {
+                    if (! isset($odds[$snapshot->fixture_id]) && $snapshot->observed_at < $evaluated[$snapshot->fixture_id]['kickoff_at']) {
+                        $odds[$snapshot->fixture_id] = $snapshot->probabilities();
+                    }
+                });
+        }
+        if (! $odds) {
+            return null;
+        }
+        $score = function (callable $forecast) use ($odds, $evaluated) {
+            [$brier, $logLoss] = [0.0, 0.0];
+            foreach (array_keys($odds) as $id) {
+                $probs = $forecast($id);
+                $actual = $evaluated[$id]['actual'];
+                foreach ($probs as $outcome => $prob) {
+                    $brier += ($prob - ($outcome === $actual ? 1 : 0)) ** 2;
+                }
+                $logLoss -= log(max(1e-15, $probs[$actual]));
+            }
+
+            return ['brier_score' => $brier / count($odds), 'log_loss' => $logLoss / count($odds)];
+        };
+
+        return ['count' => count($odds), 'bolum' => $score(fn ($id) => $evaluated[$id]['probabilities']), 'bookmakers' => $score(fn ($id) => $odds[$id])];
     }
 }

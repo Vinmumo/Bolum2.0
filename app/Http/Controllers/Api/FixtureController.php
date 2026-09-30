@@ -48,7 +48,7 @@ class FixtureController extends Controller
 
     public function show(Fixture $fixture, MatchHistory $history)
     {
-        return (new FixtureResource($fixture->load(self::RELATIONS)))->additional(['form' => $history->form($fixture)]);
+        return (new FixtureResource($fixture->load(self::RELATIONS)))->additional(['form' => $history->form($fixture), 'market' => $fixture->latestPreKickoffOdds()?->toSummary()]);
     }
 
     public function store(Request $request, CreateFixtureAction $action)

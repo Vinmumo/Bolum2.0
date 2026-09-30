@@ -7,6 +7,7 @@ use App\Models\League;
 use App\Models\Prediction;
 use App\Models\ProviderCall;
 use App\Services\FixtureImporter;
+use App\Services\OddsImporter;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -48,6 +49,19 @@ Artisan::command('fixtures:sync {--recent : Only matches from '.FixtureImporter:
 // Hourly syncs fetch only nearby matches; a nightly full sync catches any wider schedule changes.
 Schedule::command('fixtures:sync', ['--recent'])->hourly()->withoutOverlapping()->when(fn () => config('football.sync_enabled'));
 Schedule::command('fixtures:sync')->dailyAt('03:30')->withoutOverlapping()->when(fn () => config('football.sync_enabled'));
+Artisan::command('odds:sync', function (OddsImporter $importer) {
+    try {
+        $result = $importer->run();
+        $this->info('Saved '.$result['saved'].' bookmaker snapshots; '.$result['unmatched'].' events could not be matched to a fixture.'
+            .($result['credits_remaining'] !== null ? ' '.$result['credits_remaining'].' Odds API credits left this month.' : ''));
+    } catch (ProviderUnavailable $error) {
+        $this->error($error->getMessage());
+
+        return 1;
+    }
+})->purpose('Save bookmaker consensus probabilities for upcoming imported fixtures');
+// One call per competition per day: about 30 credits a month per league on the free 500-credit plan.
+Schedule::command('odds:sync')->dailyAt('09:00')->withoutOverlapping()->when(fn () => config('football.odds_sync_enabled') && config('football.odds_api_key'));
 Artisan::command('fixtures:backfill', function (FixtureImporter $importer) {
     try {
         $this->info('Imported '.$importer->backfillPreviousSeason().' fixtures from the previous season.');

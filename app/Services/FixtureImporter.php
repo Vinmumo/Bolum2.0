@@ -7,6 +7,7 @@ use App\Models\Fixture;
 use App\Models\League;
 use App\Models\Team;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -60,34 +61,71 @@ class FixtureImporter
                 $source = 'football-data';
                 $league = League::firstOrNew(['source' => $source, 'external_id' => (string) $data['competition']['id']]);
                 $league->fill(['name' => $data['competition']['name'], 'country' => mb_substr($data['matches'][0]['area']['name'] ?? 'International', 0, 100)])->save();
+                // Preload existing rows and upsert only changed ones, so a sync is a handful of queries
+                // and updated_at still means "last changed" for match-history cutoffs.
+                $teams = collect();
                 foreach ($data['matches'] as $match) {
-                    $teams = [];
                     foreach (['homeTeam', 'awayTeam'] as $side) {
-                        $team = Team::firstOrNew(['source' => $source, 'external_id' => $league->external_id.':'.$match[$side]['id']]);
-                        $team->fill(['name' => $match[$side]['name'], 'league_id' => $league->id]);
+                        $id = $league->external_id.':'.$match[$side]['id'];
                         // Incomplete optional artwork must not discard a valid fixture batch.
-                        if ($crest = Team::normalizeCrestUrl($match[$side]['crest'] ?? null)) {
-                            $team->crest_url = $crest;
-                        }
-                        $team->save();
-                        $teams[] = $team;
+                        $crest = Team::normalizeCrestUrl($match[$side]['crest'] ?? null);
+                        $teams[$id] = ['name' => $match[$side]['name'], 'crest_url' => $crest ?? $teams[$id]['crest_url'] ?? null];
                     }
+                }
+                $existing = Team::where('source', $source)->whereIn('external_id', $teams->keys())->get()->keyBy('external_id');
+                $rows = [];
+                foreach ($teams as $externalId => $values) {
+                    $team = $existing[$externalId] ?? new Team(['source' => $source, 'external_id' => $externalId]);
+                    $team->fill(['name' => $values['name'], 'league_id' => $league->id]);
+                    if ($values['crest_url']) {
+                        $team->crest_url = $values['crest_url'];
+                    }
+                    if (! $team->exists || $team->isDirty()) {
+                        $rows[] = $this->row($team, ['source', 'external_id', 'name', 'league_id', 'crest_url']);
+                    }
+                }
+                $this->upsert(Team::class, $rows, ['name', 'league_id', 'crest_url']);
+                $teamIds = Team::where('source', $source)->whereIn('external_id', $teams->keys())->pluck('id', 'external_id');
+
+                $existing = Fixture::where('source', $source)->whereIn('external_id', array_map(fn ($m) => (string) $m['id'], $data['matches']))->get()->keyBy('external_id');
+                $columns = ['league_id', 'home_team_id', 'away_team_id', 'kickoff_at', 'season', 'matchday', 'status', 'is_finished', 'home_goals', 'away_goals', 'result_recorded_at'];
+                $rows = [];
+                foreach ($data['matches'] as $match) {
                     $status = match ($match['status']) {
                         'FINISHED' => 'finished','SCHEDULED','TIMED' => 'scheduled','POSTPONED','SUSPENDED' => 'postponed','CANCELLED','AWARDED' => 'cancelled',default => 'live'
                     };
-                    $fixture = Fixture::firstOrNew(['source' => $source, 'external_id' => (string) $match['id']]);
-                    $fixture->fill(['league_id' => $league->id, 'home_team_id' => $teams[0]->id, 'away_team_id' => $teams[1]->id, 'kickoff_at' => $match['utcDate'], 'season' => substr($match['season']['startDate'], 0, 4), 'matchday' => $match['matchday'] ?? null, 'status' => $status, 'is_finished' => $status === 'finished', 'home_goals' => $status === 'finished' ? $match['score']['fullTime']['home'] : null, 'away_goals' => $status === 'finished' ? $match['score']['fullTime']['away'] : null]);
+                    $fixture = $existing[(string) $match['id']] ?? new Fixture(['source' => $source, 'external_id' => (string) $match['id']]);
+                    $fixture->fill(['league_id' => $league->id, 'home_team_id' => $teamIds[$league->external_id.':'.$match['homeTeam']['id']], 'away_team_id' => $teamIds[$league->external_id.':'.$match['awayTeam']['id']], 'kickoff_at' => $match['utcDate'], 'season' => substr($match['season']['startDate'], 0, 4), 'matchday' => $match['matchday'] ?? null, 'status' => $status, 'is_finished' => $status === 'finished', 'home_goals' => $status === 'finished' ? $match['score']['fullTime']['home'] : null, 'away_goals' => $status === 'finished' ? $match['score']['fullTime']['away'] : null]);
                     if ($fixture->is_finished && (! $fixture->result_recorded_at || $fixture->isDirty(['home_goals', 'away_goals']))) {
                         $fixture->result_recorded_at = now();
                     }
                     if (! $fixture->is_finished) {
                         $fixture->result_recorded_at = null;
                     }
-                    $fixture->save();
+                    if (! $fixture->exists || $fixture->isDirty()) {
+                        $rows[] = $this->row($fixture, ['source', 'external_id', ...$columns]);
+                    }
                 }
+                $this->upsert(Fixture::class, $rows, $columns);
+                Cache::forget(Fixture::FILTER_OPTIONS_CACHE_KEY);
 
                 return count($data['matches']);
             }, 3);
         });
+    }
+
+    /** Raw storage values (after casts and mutators) in a fixed column order for a bulk upsert. */
+    private function row(Model $model, array $columns): array
+    {
+        $attributes = $model->getAttributes();
+
+        return array_combine($columns, array_map(fn ($column) => $attributes[$column] ?? null, $columns));
+    }
+
+    private function upsert(string $model, array $rows, array $update): void
+    {
+        foreach (array_chunk($rows, 500) as $chunk) {
+            $model::upsert($chunk, ['source', 'external_id'], $update);
+        }
     }
 }

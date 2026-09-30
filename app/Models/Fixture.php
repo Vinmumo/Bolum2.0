@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\Cache;
 
 class Fixture extends Model
 {
@@ -17,6 +18,16 @@ class Fixture extends Model
     public function predictions(): HasMany
     {
         return $this->hasMany(Prediction::class);
+    }
+
+    public const FILTER_OPTIONS_CACHE_KEY = 'fixtures:filter-options';
+
+    protected static function booted(): void
+    {
+        // Admin edits refresh the cached round list; the importer clears it after its bulk writes.
+        $forget = fn () => Cache::forget(self::FILTER_OPTIONS_CACHE_KEY);
+        static::saved($forget);
+        static::deleted($forget);
     }
 
     protected $attributes = ['status' => 'scheduled', 'is_finished' => false];

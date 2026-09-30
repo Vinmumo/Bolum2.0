@@ -23,7 +23,9 @@ class AppServiceProvider extends ServiceProvider
     {
         Model::preventLazyLoading(! app()->isProduction());
         Gate::define('manage-catalog', fn (User $user) => $user->is_admin);
-        RateLimiter::for('auth', fn (Request $r) => Limit::perMinute(10)->by($r->ip()));
+        RateLimiter::for('api', fn (Request $r) => Limit::perMinute(config('app.api_rate_limit'))->by($r->user()?->id ?: $r->ip()));
+        // Per-IP caps bursts; email|IP slows repeated guesses against one account without letting others lock it.
+        RateLimiter::for('auth', fn (Request $r) => [Limit::perMinute(10)->by($r->ip()), Limit::perMinute(5)->by(mb_strtolower((string) $r->input('email')).'|'.$r->ip())]);
         RateLimiter::for('account', fn (Request $r) => Limit::perMinute(10)->by($r->user()?->id ?: $r->ip()));
         RateLimiter::for('football-read', fn (Request $r) => Limit::perMinute(10)->by($r->ip()));
         RateLimiter::for('predictions', fn (Request $r) => Limit::perMinute(20)->by($r->user()?->id ?: $r->ip()));

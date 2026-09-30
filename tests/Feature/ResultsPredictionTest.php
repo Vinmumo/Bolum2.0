@@ -8,6 +8,7 @@ use App\Models\Fixture;
 use App\Models\League;
 use App\Models\Prediction;
 use App\Models\Provider;
+use App\Models\Team;
 use App\Models\User;
 use App\Services\PredictionCalculator;
 use App\Services\Providers\ResultsFootballProvider;
@@ -91,22 +92,54 @@ class ResultsPredictionTest extends TestCase
         $this->assertEqualsWithDelta(2, $snapshot['home'], 0.000001);
     }
 
-    public function test_rates_use_venue_specific_attack_and_defence_with_league_smoothing(): void
+    private function history(int $home, int $away, int $homeGoals, int $awayGoals, int $times): void
     {
-        Fixture::whereIn('id', $this->historyIds)->update(['kickoff_at' => now()->subDays(2)]);
-        Fixture::whereIn('id', array_slice($this->historyIds, 10))->update([
-            'home_team_id' => $this->fixture->away_team_id, 'away_team_id' => $this->fixture->home_team_id,
-            'home_goals' => 4, 'away_goals' => 0,
-        ]);
+        for ($i = 0; $i < $times; $i++) {
+            (new Fixture)->forceFill(['league_id' => $this->fixture->league_id, 'home_team_id' => $home, 'away_team_id' => $away,
+                'source' => 'football-data', 'status' => 'finished', 'is_finished' => true, 'kickoff_at' => now()->subDays(3),
+                'home_goals' => $homeGoals, 'away_goals' => $awayGoals, 'result_recorded_at' => now()->subDays(2), 'updated_at' => now()->subDays(2)])->save();
+        }
+    }
+
+    public function test_ratings_credit_goals_against_strong_defences_more_than_against_weak_ones(): void
+    {
+        Fixture::whereIn('id', $this->historyIds)->delete();
+        [$home, $away] = [$this->fixture->home_team_id, $this->fixture->away_team_id];
+        $strong = Team::create(['league_id' => $this->fixture->league_id, 'name' => 'Strong defence'])->id;
+        $weak = Team::create(['league_id' => $this->fixture->league_id, 'name' => 'Weak defence'])->id;
+        $this->history($strong, $weak, 3, 0, 10);
+        $this->history($weak, $strong, 0, 3, 10);
+        // Identical 1-1 records, but the home side earned theirs against the strong defence.
+        $this->history($home, $strong, 1, 1, 5);
+        $this->history($away, $weak, 1, 1, 5);
         $inputs = app(ResultsFootballProvider::class)->snapshot($this->fixture, CarbonImmutable::now());
-        $weight = 0.5 ** (2 / 90);
-        $homeRate = (10 * 2 * $weight + 5 * 3) / (10 * $weight + 5);
-        $awayRate = (10 * $weight + 5 * 0.5) / (10 * $weight + 5);
-        $this->assertSame(10, $inputs['home_venue_matches']);
-        $this->assertSame(10, $inputs['away_venue_matches']);
-        $this->assertEqualsWithDelta($homeRate ** 2 / 3, $inputs['home'], 0.000001);
-        $this->assertEqualsWithDelta($awayRate ** 2 / 0.5, $inputs['away'], 0.000001);
-        $this->assertFalse($inputs['limited_sample']);
+        $this->assertSame('results-ratings-v2', $inputs['model_version']);
+        $this->assertSame(30, $inputs['league_matches']);
+        $this->assertGreaterThan($inputs['away_attack'] * 1.2, $inputs['home_attack']);
+        $this->assertGreaterThan($inputs['away'], $inputs['home']);
+        $this->assertLessThan(200, $inputs['iterations']);
+    }
+
+    public function test_rho_is_fitted_from_excess_low_scoring_draws(): void
+    {
+        $inputs = app(ResultsFootballProvider::class)->snapshot($this->fixture, CarbonImmutable::now());
+        // No 0-0/1-0/0-1/1-1 results carry no low-score evidence, so rho stays at the prior mean.
+        $this->assertEqualsWithDelta(-0.1, $inputs['rho'], 1e-9);
+        [$home, $away] = [$this->fixture->home_team_id, $this->fixture->away_team_id];
+        $this->history($home, $away, 0, 0, 10);
+        $this->history($home, $away, 1, 1, 10);
+        $inputs = app(ResultsFootballProvider::class)->snapshot($this->fixture, CarbonImmutable::now());
+        $this->assertLessThan(-0.1, $inputs['rho']);
+        $this->assertGreaterThanOrEqual(-0.2, $inputs['rho']);
+        $result = app(PredictionCalculator::class)->calculate(['results_inputs' => $inputs], [['driver' => 'results', 'weight' => 1]]);
+        $this->assertSame($inputs['rho'], $result['rho']);
+        $this->assertSame('dixon-coles-v1', $result['model']);
+    }
+
+    public function test_pending_predictions_frozen_by_the_previous_model_version_still_complete(): void
+    {
+        $goals = app(ResultsFootballProvider::class)->expectedGoals(['results_inputs' => ['model_version' => 'results-rates-v1', 'home' => 1.4, 'away' => 1.1]]);
+        $this->assertSame(['home' => 1.4, 'away' => 1.1], $goals);
     }
 
     public function test_team_minimum_is_required_even_with_enough_league_matches(): void
